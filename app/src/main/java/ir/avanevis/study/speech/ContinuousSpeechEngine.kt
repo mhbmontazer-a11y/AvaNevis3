@@ -64,7 +64,8 @@ class ContinuousSpeechEngine(
     private val context: Context,
     private val scope: CoroutineScope,
     private val onSentenceCommitted: suspend (processedText: String, rawText: String, confidence: Float, latencyMs: Long) -> Unit,
-    private val onVoiceCommand: suspend (StudyVoiceCommand) -> Unit
+    private val onVoiceCommand: suspend (StudyVoiceCommand) -> Unit,
+    private val onWhisperCorrection: suspend (String, String) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var offlineEngine: OfflinePersianEngine? = null
@@ -132,7 +133,7 @@ class ContinuousSpeechEngine(
             if (usingOffline) return
             usingOffline = true
             currentSettings = initialSettings
-            offlineEngine = OfflinePersianEngine(context, scope, _telemetry, onSentenceCommitted, onVoiceCommand)
+            offlineEngine = OfflinePersianEngine(context, scope, _telemetry, onSentenceCommitted, onVoiceCommand, onWhisperCorrection)
                 .also { it.start(initialSettings) }
             return
         }

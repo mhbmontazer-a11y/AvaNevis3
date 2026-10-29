@@ -22,6 +22,9 @@ import org.vosk.Recognizer
 import java.io.File
 import java.io.FileOutputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -34,7 +37,8 @@ internal class OfflinePersianEngine(
     private val scope: CoroutineScope,
     private val telemetry: MutableStateFlow<SpeechEngineTelemetry>,
     private val onSentence: suspend (String, String, Float, Long) -> Unit,
-    private val onCommand: suspend (StudyVoiceCommand) -> Unit
+    private val onCommand: suspend (StudyVoiceCommand) -> Unit,
+    private val onWhisperCorrection: suspend (String, String) -> Unit
 ) {
     private val running = AtomicBoolean(false)
     private val paused = AtomicBoolean(false)
@@ -46,6 +50,9 @@ internal class OfflinePersianEngine(
     private var sessionToken = 0L
     private var silenceSinceMs = 0L
     private var samplesRead = 0L
+    private val reviewQueue = Channel<Pair<String, ByteArray>>(2)
+    private var reviewWorker: Job? = null
+    private val utterancePcm = ByteArrayOutputStream()
     @Volatile private var reviewAudioFile: File? = null
 
     fun start(config: StudySettings) {
@@ -56,6 +63,20 @@ internal class OfflinePersianEngine(
         lastRmsAt = 0L
         silenceSinceMs = 0L
         samplesRead = 0L
+        utterancePcm.reset()
+        reviewWorker = scope.launch(Dispatchers.Default) {
+            val reviewer = WhisperReviewEngine(context)
+            for ((original, audio) in reviewQueue) {
+                try {
+                    val candidate = reviewer.transcribePcm(audio)
+                    if (WhisperCorrectionPolicy.shouldReplace(original, candidate)) {
+                        onWhisperCorrection(original, candidate)
+                    }
+                } catch (_: Exception) {
+                    // Vosk notes remain safe when Whisper fails.
+                }
+            }
+        }
         sessionToken++
         telemetry.value = SpeechEngineTelemetry(state = ListeningState.STARTING, statusMessage = "در حال بارگذاری موتور مستقل فارسی…")
         val token = sessionToken
@@ -126,6 +147,9 @@ internal class OfflinePersianEngine(
                     continue
                 }
                 capture?.write(buffer, 0, bytes)
+                if (utterancePcm.size() + bytes <= 20 * 16000 * 2) {
+                    utterancePcm.write(buffer, 0, bytes)
+                }
                 samplesRead += bytes / 2
                 val now = System.currentTimeMillis()
                 if (now - lastRmsAt >= 130L) {
@@ -158,6 +182,8 @@ internal class OfflinePersianEngine(
             }
             } finally { capture?.close() }
             commit(JSONObject(recognizer.finalResult).optString("text").trim())
+            reviewQueue.close()
+            withTimeoutOrNull(2_000L) { reviewWorker?.join() }
             if (token == sessionToken) telemetry.value = SpeechEngineTelemetry(state = ListeningState.IDLE, statusMessage = "ضبط آفلاین پایان یافت")
         } catch (t: Exception) {
             if (running.get() && token == sessionToken) telemetry.value = telemetry.value.copy(
@@ -166,6 +192,7 @@ internal class OfflinePersianEngine(
                 isRecoveryRequired = true
             )
         } finally {
+            reviewQueue.close()
             if (token == sessionToken) running.set(false)
             if (recorder === audio) recorder = null
             runCatching { audio?.stop() }
@@ -176,6 +203,8 @@ internal class OfflinePersianEngine(
     }
 
     private suspend fun commit(raw: String) {
+        val captured = utterancePcm.toByteArray()
+        utterancePcm.reset()
         if (raw.isBlank()) return
         lastPartial = ""
         val started = System.currentTimeMillis()
@@ -185,6 +214,10 @@ internal class OfflinePersianEngine(
         } else {
             val processed = PersianTextProcessor.processUtterance(raw, settings)
             onSentence(processed, raw, -1f, System.currentTimeMillis() - started)
+            // One audio utterance maps to one saved Vosk sentence.
+            if (captured.size in (2 * 16000 * 2)..(20 * 16000 * 2)) {
+                reviewQueue.trySend(raw to captured)
+            }
         }
         telemetry.value = telemetry.value.copy(
             livePartialText = "", lastCommittedText = raw,

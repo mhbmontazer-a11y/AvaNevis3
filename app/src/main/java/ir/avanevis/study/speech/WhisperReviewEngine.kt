@@ -16,6 +16,18 @@ internal class WhisperReviewEngine(private val context: Context) {
         }
     }
 
+    /** Short 16 kHz mono signed PCM utterance, run off the recording thread. */
+    fun transcribePcm(pcm: ByteArray): String {
+        check(available) { "کتابخانهٔ ویسپر نصب نشده است" }
+        val model = installModel()
+        val samples = FloatArray(pcm.size / 2) { i ->
+            val lo = pcm[2 * i].toInt() and 255
+            val hi = pcm[2 * i + 1].toInt()
+            ((hi shl 8) or lo).toShort() / 32768.0f
+        }
+        return nativeTranscribe(model.absolutePath, samples).trim()
+    }
+
     fun transcribeFile(pcm: File): List<String> {
         check(available) { "کتابخانهٔ بومی ویسپر نصب نشده است" }
         val model = installModel()

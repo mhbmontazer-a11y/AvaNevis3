@@ -67,6 +67,9 @@ interface StudyDao {
         updateSession(currentSession.copy(sentenceCount = countSentencesInSession(sentence.sessionId)))
     }
 
+    @Query("SELECT * FROM note_sentences WHERE sessionId = :sessionId AND rawTranscript = :raw AND isManuallyEdited = 0 ORDER BY id DESC LIMIT 1")
+    suspend fun getLatestUneditedByRaw(sessionId: Long, raw: String): NoteSentenceEntity?
+
     @Query("SELECT * FROM note_sentences WHERE sessionId = :sessionId ORDER BY orderIndex DESC, id DESC LIMIT 1")
     suspend fun getLastSentenceInSession(sessionId: Long): NoteSentenceEntity?
 
