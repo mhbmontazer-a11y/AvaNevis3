@@ -79,7 +79,8 @@ interface StudyDao {
         notebookId: Long,
         processedText: String,
         rawText: String,
-        confidence: Float
+        confidence: Float,
+        isManual: Boolean = false
     ): NoteSentenceEntity {
         val nextIndex = getMaxOrderIndex(sessionId) + 1
         val entity = NoteSentenceEntity(
@@ -89,7 +90,8 @@ interface StudyDao {
             content = processedText,
             rawTranscript = rawText,
             createdAt = System.currentTimeMillis(),
-            confidence = confidence
+            confidence = confidence,
+            isManuallyEdited = isManual
         )
         val newId = insertSentence(entity)
         val currentSession = getSessionById(sessionId)

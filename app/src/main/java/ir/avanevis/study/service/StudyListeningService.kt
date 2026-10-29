@@ -135,6 +135,8 @@ class StudyListeningService : LifecycleService() {
     }
 
     private fun startForegroundStudySession(sessionId: Long, notebookId: Long, startIntent: Intent) {
+        if (stoppingJob?.isActive == true) return
+        if (activeSessionId > 0L) return // avoid overwriting a live session on repeated intents
         activeSessionId = sessionId
         activeNotebookId = notebookId
         _activeSessionIdFlow.value = sessionId

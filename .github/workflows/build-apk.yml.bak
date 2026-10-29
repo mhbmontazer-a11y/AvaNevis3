@@ -1,0 +1,44 @@
+name: Build AvaNevis Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 34 build components
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.6'
+
+      - name: Run Unit Tests (Persian NLP, VAD & Continuous State Machine)
+        run: gradle testDebugUnitTest
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload Ready-to-Install Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AvaNevis-Study-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

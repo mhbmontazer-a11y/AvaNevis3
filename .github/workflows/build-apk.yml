@@ -33,7 +33,17 @@ jobs:
         with:
           gradle-version: '8.6'
 
-      - name: Run Unit Tests (Persian NLP, VAD & Continuous State Machine)
+      - name: Download verified Persian Vosk model for offline recognition
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets
+          curl -fL --retry 4 --connect-timeout 30 --max-time 300 \
+            "https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip" -o /tmp/vosk-fa.zip
+          unzip -t /tmp/vosk-fa.zip >/dev/null
+          unzip -q /tmp/vosk-fa.zip -d app/src/main/assets
+          test -f app/src/main/assets/vosk-model-small-fa-0.42/am/final.mdl
+
+      - name: Run Unit Tests (Persian NLP and continuous speech)
         run: gradle testDebugUnitTest
 
       - name: Build Debug APK

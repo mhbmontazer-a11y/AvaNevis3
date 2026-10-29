@@ -66,6 +66,8 @@ class ContinuousSpeechEngine(
     private val onVoiceCommand: suspend (StudyVoiceCommand) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var offlineEngine: OfflinePersianEngine? = null
+    private var usingOffline = false
     private var speechRecognizer: SpeechRecognizer? = null
     private val utterance = UtteranceAccumulator()
     private val outstandingWrites = mutableSetOf<Job>()
@@ -95,6 +97,7 @@ class ContinuousSpeechEngine(
 
     /** Retry in the same study session without creating duplicate sessions or losing notes. */
     fun retryRecognition() {
+        if (usingOffline) { offlineEngine?.retry(); return }
         if (!isSessionActive || stopRequested || pausedForInterruption) return
         restartJob?.cancel()
         readinessTimeoutJob?.cancel()
@@ -123,6 +126,14 @@ class ContinuousSpeechEngine(
     }
 
     fun startContinuousSession(initialSettings: StudySettings) {
+        if (initialSettings.engineMode != RecognitionEngineMode.ONLINE_HIGH_ACCURACY) {
+            if (usingOffline) return
+            usingOffline = true
+            currentSettings = initialSettings
+            offlineEngine = OfflinePersianEngine(context, scope, _telemetry, onSentenceCommitted, onVoiceCommand)
+                .also { it.start(initialSettings) }
+            return
+        }
         currentSettings = initialSettings
         if (isSessionActive) return
         isSessionActive = true
@@ -149,6 +160,12 @@ class ContinuousSpeechEngine(
      * commit any remaining hypothesis and wait for all database writes before returning.
      */
     fun stopContinuousSession(): Job? {
+        if (usingOffline) {
+            usingOffline = false
+            val engine = offlineEngine
+            offlineEngine = null
+            return engine?.stop()
+        }
         val activeStop = gracefulStopJob
         if (activeStop != null && activeStop.isActive) return activeStop
 
@@ -202,6 +219,7 @@ class ContinuousSpeechEngine(
     }
 
     fun pauseForAudioInterruption() {
+        if (usingOffline) { offlineEngine?.pause(); return }
         if (!isSessionActive || pausedForInterruption) return
         pausedForInterruption = true
         readinessTimeoutJob?.cancel()
@@ -216,6 +234,7 @@ class ContinuousSpeechEngine(
     }
 
     fun resumeAfterAudioInterruption() {
+        if (usingOffline) { offlineEngine?.resume(); return }
         if (!isSessionActive || !pausedForInterruption) return
         pausedForInterruption = false
         if (utterance.hasText) scheduleCommitAfterQuietPeriod()

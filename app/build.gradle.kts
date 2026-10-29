@@ -12,8 +12,8 @@ android {
         applicationId = "ir.avanevis.study"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.7.0"
+        versionCode = 9
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -48,6 +48,10 @@ android {
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
+    }
+
+    androidResources {
+        noCompress += listOf("mdl", "fst", "ark", "bin", "conf")
     }
 
     packaging {
@@ -86,6 +90,8 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+
+    implementation("com.alphacephei:vosk-android:0.3.75")
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")

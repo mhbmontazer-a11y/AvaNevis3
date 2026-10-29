@@ -1134,14 +1134,14 @@ fun SettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("ترجیح حالت آفلاین (اگر سرویس گوشی پشتیبانی کند)", fontSize = 14.sp)
+                    Text("موتور مستقل فارسی Vosk (بدون گوگل)", fontSize = 14.sp)
                     Switch(
-                        checked = settings.engineMode == RecognitionEngineMode.OFFLINE_ONLY,
+                        checked = settings.engineMode != RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
                         onCheckedChange = { offline ->
                             onUpdate {
                                 it.copy(
                                     engineMode = if (offline) RecognitionEngineMode.OFFLINE_ONLY
-                                    else RecognitionEngineMode.HYBRID_SMART
+                                    else RecognitionEngineMode.ONLINE_HIGH_ACCURACY
                                 )
                             }
                         }
@@ -1149,7 +1149,7 @@ fun SettingsDialog(
                 }
 
                 Text(
-                    "این گزینه فقط ترجیح آفلاین را به سرویس گفتار اندروید اعلام می‌کند؛ پشتیبانی و کیفیت به گوشی و بسته زبان نصب‌شده بستگی دارد.",
+                    "با فعال بودن این گزینه، گفتار فارسی در خود گوشی پردازش می‌شود. مدل فارسی هنگام ساخت APK اضافه می‌شود؛ اگر مدل موجود نباشد، خطا نمایش داده می‌شود.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

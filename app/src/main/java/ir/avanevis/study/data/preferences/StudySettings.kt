@@ -9,11 +9,11 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "study_settings")
 
 enum class RecognitionEngineMode {
-    // The app uses Android's installed recognition provider; it does not ship a separate ASR model.
+    // Legacy setting; now routed to built-in Vosk Persian for safe upgrades.
     HYBRID_SMART,
-    // Sent as EXTRA_PREFER_OFFLINE. This is only a provider hint, not a guarantee.
+    // Built-in Vosk Persian model; does not need Android speech services.
     OFFLINE_ONLY,
-    // Kept for stored-setting compatibility; the app does not implement a separate cloud engine.
+    // Android provider fallback, only when user explicitly disables Vosk.
     ONLINE_HIGH_ACCURACY
 }
 
@@ -30,7 +30,7 @@ enum class DigitDisplayMode {
 data class StudySettings(
     val silenceThresholdMs: Long = 3500L,      // مدت سکوت برای تشخیص پایان جمله (میلی‌ثانیه)
     val vadSensitivityDb: Float = 3.5f,        // آستانه RMS تشخیص فعالیت صوتی
-    val engineMode: RecognitionEngineMode = RecognitionEngineMode.HYBRID_SMART,
+    val engineMode: RecognitionEngineMode = RecognitionEngineMode.OFFLINE_ONLY,
     val fontSizeSp: Int = 18,
     val autoNumbering: Boolean = true,
     val autoPunctuation: Boolean = true,
@@ -71,7 +71,7 @@ class StudySettingsRepository(private val context: Context) {
             vadSensitivityDb = prefs[Keys.VAD_DB] ?: 3.5f,
             engineMode = prefs[Keys.ENGINE_MODE]?.let {
                 runCatching { RecognitionEngineMode.valueOf(it) }.getOrNull()
-            } ?: RecognitionEngineMode.HYBRID_SMART,
+            } ?: RecognitionEngineMode.OFFLINE_ONLY,
             fontSizeSp = prefs[Keys.FONT_SIZE] ?: 18,
             autoNumbering = prefs[Keys.AUTO_NUMBERING] ?: true,
             autoPunctuation = prefs[Keys.AUTO_PUNCTUATION] ?: true,
@@ -98,7 +98,7 @@ class StudySettingsRepository(private val context: Context) {
                 vadSensitivityDb = prefs[Keys.VAD_DB] ?: 3.5f,
                 engineMode = prefs[Keys.ENGINE_MODE]?.let {
                     runCatching { RecognitionEngineMode.valueOf(it) }.getOrNull()
-                } ?: RecognitionEngineMode.HYBRID_SMART,
+                } ?: RecognitionEngineMode.OFFLINE_ONLY,
                 fontSizeSp = prefs[Keys.FONT_SIZE] ?: 18,
                 autoNumbering = prefs[Keys.AUTO_NUMBERING] ?: true,
                 autoPunctuation = prefs[Keys.AUTO_PUNCTUATION] ?: true,
