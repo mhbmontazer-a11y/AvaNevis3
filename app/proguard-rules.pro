@@ -1,0 +1,3 @@
+-keepattributes *Annotation*,SourceFile,LineNumberTable
+-keep class ir.avanevis.study.data.local.** { *; }
+-dontwarn kotlinx.coroutines.**

@@ -1,0 +1,22 @@
+AvaNevis Study — Local validation report
+Date: 2026-10-29
+
+Completed checks:
+- Compiled the pure Kotlin speech/text logic with Kotlin/JVM 1.9.0 using temporary stubs for Android DataStore settings.
+- Ran 11 assertions covering progressive partial hypotheses, utterance overlap merging, preserving repeated words and Persian hamza, Persian digit conversion, half-spaces, and exact voice-command matching. Result: PASS.
+- Ran Kotlin compiler parser over all app Kotlin sources. No syntax-like parser errors were reported; full compilation was not possible because Android SDK and Android/Compose dependencies are not installed.
+
+Not completed:
+- No APK was generated.
+- No Android Gradle build, emulator test, or on-device microphone test was run.
+
+Build blocker in this execution environment:
+- No Gradle executable or Gradle wrapper JAR is installed.
+- No Android SDK (android.jar, platform 34, build-tools) is installed.
+- Network DNS is unavailable, so Gradle and Android SDK components cannot be downloaded here.
+
+Important product limitation:
+- The project still uses Android SpeechRecognizer. It is session-based and cannot guarantee gapless audio capture or 100% word-perfect transcription. The app waits for recognizer readiness and merges adjacent session results, but a streaming PCM/VAD ASR engine with a suitable Persian model is required for stronger continuity.
+
+Cloud build path:
+- The repository includes .github/workflows/build-apk.yml. Upload the project to a GitHub repository, then run Actions > Build AvaNevis Android APK. On a successful run, download the AvaNevis-Study-Debug-APK artifact.

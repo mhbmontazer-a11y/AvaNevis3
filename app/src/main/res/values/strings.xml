@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">آوانویس مطالعه</string>
+    <string name="start_study">شروع مطالعه</string>
+    <string name="stop_study">پایان جلسه مطالعه</string>
+    <string name="listening_active">در حال گوش دادن هوشمند...</string>
+    <string name="notification_channel_name">نشست فعال یادداشت‌برداری مطالعه</string>
+    <string name="notification_channel_desc">نمایش وضعیت میکروفون هنگام یادداشت‌برداری صوتی بدون دخالت دست</string>
+</resources>
