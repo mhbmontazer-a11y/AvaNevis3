@@ -1,0 +1,8 @@
+/.gradle/
+/build/
+/app/build/
+/app/.cxx/
+/app/src/main/cpp/whisper.cpp/
+/app/src/main/assets/whisper/*.bin
+/app/src/main/assets/vosk-model-small-fa-0.42/
+/local.properties

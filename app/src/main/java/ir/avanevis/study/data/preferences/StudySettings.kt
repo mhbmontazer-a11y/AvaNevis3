@@ -42,7 +42,8 @@ data class StudySettings(
     val accentPalette: AccentPalette = AccentPalette.OCEAN,
     val maxStartupRetries: Int = 3,
     val showRecognitionConfidence: Boolean = false,
-    val speechQualityProfile: SpeechQualityProfile = SpeechQualityProfile.BALANCED
+    val speechQualityProfile: SpeechQualityProfile = SpeechQualityProfile.BALANCED,
+    val whisperReviewEnabled: Boolean = false
 )
 
 class StudySettingsRepository(private val context: Context) {
@@ -63,6 +64,7 @@ class StudySettingsRepository(private val context: Context) {
         val MAX_STARTUP_RETRIES = intPreferencesKey("max_startup_retries")
         val SHOW_CONFIDENCE = booleanPreferencesKey("show_recognition_confidence")
         val SPEECH_PROFILE = stringPreferencesKey("speech_quality_profile")
+        val WHISPER_REVIEW = booleanPreferencesKey("whisper_review_enabled")
     }
 
     val settingsFlow: Flow<StudySettings> = context.dataStore.data.map { prefs ->
@@ -87,7 +89,8 @@ class StudySettingsRepository(private val context: Context) {
             } ?: AccentPalette.OCEAN,
             maxStartupRetries = (prefs[Keys.MAX_STARTUP_RETRIES] ?: 3).coerceIn(1, 6),
             showRecognitionConfidence = prefs[Keys.SHOW_CONFIDENCE] ?: false,
-            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED
+            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED,
+            whisperReviewEnabled = prefs[Keys.WHISPER_REVIEW] ?: false
         )
     }
 
@@ -114,7 +117,8 @@ class StudySettingsRepository(private val context: Context) {
                 } ?: AccentPalette.OCEAN,
                 maxStartupRetries = (prefs[Keys.MAX_STARTUP_RETRIES] ?: 3).coerceIn(1, 6),
                 showRecognitionConfidence = prefs[Keys.SHOW_CONFIDENCE] ?: false,
-            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED
+            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED,
+            whisperReviewEnabled = prefs[Keys.WHISPER_REVIEW] ?: false
             )
             val updated = transform(current)
             prefs[Keys.SILENCE_MS] = updated.silenceThresholdMs
@@ -132,6 +136,7 @@ class StudySettingsRepository(private val context: Context) {
             prefs[Keys.MAX_STARTUP_RETRIES] = updated.maxStartupRetries.coerceIn(1, 6)
             prefs[Keys.SHOW_CONFIDENCE] = updated.showRecognitionConfidence
             prefs[Keys.SPEECH_PROFILE] = updated.speechQualityProfile.name
+            prefs[Keys.WHISPER_REVIEW] = updated.whisperReviewEnabled
         }
     }
 }

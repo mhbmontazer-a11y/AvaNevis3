@@ -33,6 +33,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ir.avanevis.study.speech.WhisperReviewEngine
 
 /**
  * سرویس پیش‌زمینه (Foreground Service) با نوع MICROPHONE
@@ -206,6 +209,33 @@ class StudyListeningService : LifecycleService() {
         stoppingJob = lifecycleScope.launch {
             // Don't kill the service before its final pending sentence is stored.
             speechEngine.stopContinuousSession()?.join()
+            val reviewAudio = speechEngine.takeWhisperReviewAudio()
+            val reviewSessionId = activeSessionId
+            val reviewNotebookId = activeNotebookId
+            // Whisper runs AFTER the microphone stops, never blocking Vosk's live path.
+            // The foreground notification remains active while review is running.
+            if (reviewAudio != null && reviewAudio.length() > 32000L && reviewSessionId > 0) {
+                updateForegroundNotification(status = "در حال بازبینی آفلاین با ویسپر…")
+                try {
+                    val segments = withContext(Dispatchers.Default) {
+                        WhisperReviewEngine(applicationContext).transcribeFile(reviewAudio)
+                    }
+                    val dao = (application as AvaNevisApp).database.studyDao()
+                    for (segment in segments) {
+                        dao.appendSentenceAutomatically(
+                            sessionId = reviewSessionId,
+                            notebookId = reviewNotebookId,
+                            processedText = "[بازبینی ویسپر] $segment",
+                            rawText = segment,
+                            confidence = -1f
+                        )
+                    }
+                } catch (e: Exception) {
+                    updateForegroundNotification(status = "بازبینی ویسپر انجام نشد؛ متن Vosk حفظ شد")
+                } finally {
+                    reviewAudio.delete()
+                }
+            } else reviewAudio?.delete()
             releaseSafetyWakeLock()
             abandonAudioFocusListener()
 

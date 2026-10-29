@@ -985,6 +985,16 @@ fun SettingsDialog(
             Column(modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionHeading("شنیدن و تشخیص گفتار")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("بازبینی آفلاین با Whisper", fontWeight = FontWeight.SemiBold)
+                        Text("پس از پایان ضبط، متن بازبینی‌شده به‌صورت یادداشت جداگانه اضافه می‌شود؛ ممکن است چند دقیقه طول بکشد.",
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = settings.whisperReviewEnabled,
+                        onCheckedChange = { enabled -> onUpdate { it.copy(whisperReviewEnabled = enabled) } })
+                }
                 Text("پروفایل پردازش گفتار", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SpeechQualityProfile.values().forEach { profile ->

@@ -21,6 +21,7 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.File
 import java.io.FileOutputStream
+import java.io.BufferedOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -45,6 +46,7 @@ internal class OfflinePersianEngine(
     private var sessionToken = 0L
     private var silenceSinceMs = 0L
     private var samplesRead = 0L
+    @Volatile private var reviewAudioFile: File? = null
 
     fun start(config: StudySettings) {
         if (!running.compareAndSet(false, true)) return
@@ -59,6 +61,8 @@ internal class OfflinePersianEngine(
         val token = sessionToken
         worker = scope.launch(Dispatchers.IO) { recognizeLoop(token) }
     }
+
+    fun takeReviewAudio(): File? = reviewAudioFile.also { reviewAudioFile = null }
 
     fun retry() {
         if (running.get()) return
@@ -106,6 +110,10 @@ internal class OfflinePersianEngine(
             check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "ضبط صدا شروع نشد" }
             telemetry.value = telemetry.value.copy(state = ListeningState.LISTENING_READY, statusMessage = "در حال شنیدن فارسی (آفلاین)")
             val buffer = ByteArray(4096)
+            val captureFile = if (settings.whisperReviewEnabled) File(context.cacheDir, "whisper-review-$token-${System.nanoTime()}.pcm") else null
+            reviewAudioFile = captureFile
+            val capture = captureFile?.let { BufferedOutputStream(FileOutputStream(it), 65536) }
+            try {
             while (running.get() && token == sessionToken) {
                 val bytes = audio.read(buffer, 0, buffer.size)
                 if (bytes <= 0) {
@@ -117,6 +125,7 @@ internal class OfflinePersianEngine(
                     lastPartial = ""
                     continue
                 }
+                capture?.write(buffer, 0, bytes)
                 samplesRead += bytes / 2
                 val now = System.currentTimeMillis()
                 if (now - lastRmsAt >= 130L) {
@@ -147,6 +156,7 @@ internal class OfflinePersianEngine(
                 // Vosk's endpoint detection normally finalizes utterances on silence.
                 // Never discard a partial solely because a UI timer elapsed.
             }
+            } finally { capture?.close() }
             commit(JSONObject(recognizer.finalResult).optString("text").trim())
             if (token == sessionToken) telemetry.value = SpeechEngineTelemetry(state = ListeningState.IDLE, statusMessage = "ضبط آفلاین پایان یافت")
         } catch (t: Exception) {

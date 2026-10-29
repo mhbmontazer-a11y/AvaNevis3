@@ -1,5 +1,6 @@
 package ir.avanevis.study.speech
 
+import java.io.File
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -68,6 +69,7 @@ class ContinuousSpeechEngine(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var offlineEngine: OfflinePersianEngine? = null
     private var usingOffline = false
+    private var stoppedOfflineEngine: OfflinePersianEngine? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private val utterance = UtteranceAccumulator()
     private val outstandingWrites = mutableSetOf<Job>()
@@ -159,11 +161,14 @@ class ContinuousSpeechEngine(
      * Gracefully stops recognition. Ask the provider for its final result first, then
      * commit any remaining hypothesis and wait for all database writes before returning.
      */
+    fun takeWhisperReviewAudio(): File? = stoppedOfflineEngine?.takeReviewAudio().also { stoppedOfflineEngine = null }
+
     fun stopContinuousSession(): Job? {
         if (usingOffline) {
             usingOffline = false
             val engine = offlineEngine
             offlineEngine = null
+            stoppedOfflineEngine = engine
             return engine?.stop()
         }
         val activeStop = gracefulStopJob

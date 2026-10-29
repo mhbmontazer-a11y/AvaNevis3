@@ -12,8 +12,9 @@ android {
         applicationId = "ir.avanevis.study"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "2.1.0"
+        versionCode = 10
+        versionName = "2.2.0"
+        ndk { abiFilters += listOf("arm64-v8a") }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -44,6 +45,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
 
     composeOptions {
