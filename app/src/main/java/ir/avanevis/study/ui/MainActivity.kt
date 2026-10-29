@@ -131,6 +131,8 @@ class MainActivity : ComponentActivity() {
                                     // while DataStore performs its first asynchronous read.
                                     putExtra(StudyListeningService.EXTRA_QUIET_MS, settings.silenceThresholdMs)
                                     putExtra(StudyListeningService.EXTRA_ENGINE_MODE, settings.engineMode.name)
+                                    putExtra(StudyListeningService.EXTRA_ONLINE_SERVER_URL, settings.onlineServerUrl)
+                                    putExtra(StudyListeningService.EXTRA_ONLINE_ACCESS_TOKEN, settings.onlineAccessToken)
                                     putExtra(StudyListeningService.EXTRA_SPEECH_PROFILE, settings.speechQualityProfile.name)
                                     putExtra(StudyListeningService.EXTRA_VOICE_COMMANDS, settings.voiceCommandsEnabled)
                                     putExtra(StudyListeningService.EXTRA_AUTO_PUNCTUATION, settings.autoPunctuation)
@@ -985,16 +987,24 @@ fun SettingsDialog(
             Column(modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionHeading("شنیدن و تشخیص گفتار")
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("بازبینی آفلاین با Whisper", fontWeight = FontWeight.SemiBold)
-                        Text("پس از پایان ضبط، متن بازبینی‌شده به‌صورت یادداشت جداگانه اضافه می‌شود؛ ممکن است چند دقیقه طول بکشد.",
-                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = settings.whisperReviewEnabled,
-                        onCheckedChange = { enabled -> onUpdate { it.copy(whisperReviewEnabled = enabled) } })
-                }
+                Text("نسخهٔ تمام‌آنلاین: تبدیل گفتار با سرور اختصاصی", fontWeight = FontWeight.SemiBold)
+                Text("نشانی HTTPS سرور را وارد کنید. کلید سرویس هوش مصنوعی فقط روی سرور نگهداری می‌شود.", fontSize = 12.sp)
+                OutlinedTextField(
+                    value = settings.onlineServerUrl,
+                    onValueChange = { value -> onUpdate { it.copy(onlineServerUrl = value) } },
+                    label = { Text("نشانی سرور (HTTPS)") },
+                    placeholder = { Text("https://your-server.example") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = settings.onlineAccessToken,
+                    onValueChange = { value -> onUpdate { it.copy(onlineAccessToken = value) } },
+                    label = { Text("رمز دسترسی به سرور شخصی") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("صوت هر ۸ ثانیه ارسال می‌شود؛ این نسخه پخش زندهٔ کلمه‌به‌کلمه ندارد. برای کارکردن، سرور فعال و اینترنت لازم است.", fontSize = 11.sp)
                 Text("پروفایل پردازش گفتار", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SpeechQualityProfile.values().forEach { profile ->
@@ -1139,30 +1149,7 @@ fun SettingsDialog(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("موتور مستقل فارسی Vosk (بدون گوگل)", fontSize = 14.sp)
-                    Switch(
-                        checked = settings.engineMode != RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
-                        onCheckedChange = { offline ->
-                            onUpdate {
-                                it.copy(
-                                    engineMode = if (offline) RecognitionEngineMode.OFFLINE_ONLY
-                                    else RecognitionEngineMode.ONLINE_HIGH_ACCURACY
-                                )
-                            }
-                        }
-                    )
-                }
-
-                Text(
-                    "با فعال بودن این گزینه، گفتار فارسی در خود گوشی پردازش می‌شود. مدل فارسی هنگام ساخت APK اضافه می‌شود؛ اگر مدل موجود نباشد، خطا نمایش داده می‌شود.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("موتور فعال: آنلاین فارسی — بدون مدل آفلاین روی گوشی", fontSize = 13.sp)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

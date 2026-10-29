@@ -35,7 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import ir.avanevis.study.speech.WhisperReviewEngine
+
 
 /**
  * سرویس پیش‌زمینه (Foreground Service) با نوع MICROPHONE
@@ -163,6 +163,8 @@ class StudyListeningService : LifecycleService() {
         val defaults = StudySettings()
         val initialSettings = defaults.copy(
             silenceThresholdMs = startIntent.getLongExtra(EXTRA_QUIET_MS, defaults.silenceThresholdMs),
+            onlineServerUrl = startIntent.getStringExtra(EXTRA_ONLINE_SERVER_URL) ?: "",
+            onlineAccessToken = startIntent.getStringExtra(EXTRA_ONLINE_ACCESS_TOKEN) ?: "",
             engineMode = runCatching {
                 RecognitionEngineMode.valueOf(
                     startIntent.getStringExtra(EXTRA_ENGINE_MODE) ?: defaults.engineMode.name
@@ -209,33 +211,6 @@ class StudyListeningService : LifecycleService() {
         stoppingJob = lifecycleScope.launch {
             // Don't kill the service before its final pending sentence is stored.
             speechEngine.stopContinuousSession()?.join()
-            val reviewAudio = speechEngine.takeWhisperReviewAudio()
-            val reviewSessionId = activeSessionId
-            val reviewNotebookId = activeNotebookId
-            // Whisper runs AFTER the microphone stops, never blocking Vosk's live path.
-            // The foreground notification remains active while review is running.
-            if (reviewAudio != null && reviewAudio.length() > 32000L && reviewSessionId > 0) {
-                updateForegroundNotification(status = "در حال بازبینی آفلاین با ویسپر…")
-                try {
-                    val segments = withContext(Dispatchers.Default) {
-                        WhisperReviewEngine(applicationContext).transcribeFile(reviewAudio)
-                    }
-                    val dao = (application as AvaNevisApp).database.studyDao()
-                    for (segment in segments) {
-                        dao.appendSentenceAutomatically(
-                            sessionId = reviewSessionId,
-                            notebookId = reviewNotebookId,
-                            processedText = "[بازبینی ویسپر] $segment",
-                            rawText = segment,
-                            confidence = -1f
-                        )
-                    }
-                } catch (e: Exception) {
-                    updateForegroundNotification(status = "بازبینی ویسپر انجام نشد؛ متن Vosk حفظ شد")
-                } finally {
-                    reviewAudio.delete()
-                }
-            } else reviewAudio?.delete()
             releaseSafetyWakeLock()
             abandonAudioFocusListener()
 
@@ -430,6 +405,8 @@ class StudyListeningService : LifecycleService() {
         const val EXTRA_NOTEBOOK_ID = "extra_notebook_id"
         const val EXTRA_QUIET_MS = "extra_quiet_ms"
         const val EXTRA_ENGINE_MODE = "extra_engine_mode"
+        const val EXTRA_ONLINE_SERVER_URL = "extra_online_server_url"
+        const val EXTRA_ONLINE_ACCESS_TOKEN = "extra_online_access_token"
         const val EXTRA_VOICE_COMMANDS = "extra_voice_commands"
         const val EXTRA_AUTO_PUNCTUATION = "extra_auto_punctuation"
         const val EXTRA_FIX_HALF_SPACE = "extra_fix_half_space"

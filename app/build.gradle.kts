@@ -9,12 +9,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "ir.avanevis.study"
+        applicationId = "ir.avanevis.study.online"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.2.0"
-        ndk { abiFilters += listOf("arm64-v8a") }
+        versionCode = 11
+        versionName = "3.0.0-online"
+
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -47,9 +47,7 @@ android {
         compose = true
     }
 
-    externalNativeBuild {
-        cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
-    }
+
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
@@ -96,7 +94,7 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
-    implementation("com.alphacephei:vosk-android:0.3.75")
+
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")

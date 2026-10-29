@@ -30,7 +30,9 @@ enum class DigitDisplayMode {
 data class StudySettings(
     val silenceThresholdMs: Long = 3500L,      // مدت سکوت برای تشخیص پایان جمله (میلی‌ثانیه)
     val vadSensitivityDb: Float = 3.5f,        // آستانه RMS تشخیص فعالیت صوتی
-    val engineMode: RecognitionEngineMode = RecognitionEngineMode.OFFLINE_ONLY,
+    val engineMode: RecognitionEngineMode = RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
+    val onlineServerUrl: String = "",
+    val onlineAccessToken: String = "",
     val fontSizeSp: Int = 18,
     val autoNumbering: Boolean = true,
     val autoPunctuation: Boolean = true,
@@ -52,6 +54,8 @@ class StudySettingsRepository(private val context: Context) {
         val SILENCE_MS = longPreferencesKey("silence_threshold_ms")
         val VAD_DB = floatPreferencesKey("vad_sensitivity_db")
         val ENGINE_MODE = stringPreferencesKey("engine_mode")
+        val ONLINE_SERVER_URL = stringPreferencesKey("online_server_url")
+        val ONLINE_ACCESS_TOKEN = stringPreferencesKey("online_access_token")
         val FONT_SIZE = intPreferencesKey("font_size_sp")
         val AUTO_NUMBERING = booleanPreferencesKey("auto_numbering")
         val AUTO_PUNCTUATION = booleanPreferencesKey("auto_punctuation")
@@ -71,9 +75,9 @@ class StudySettingsRepository(private val context: Context) {
         StudySettings(
             silenceThresholdMs = prefs[Keys.SILENCE_MS] ?: 3500L,
             vadSensitivityDb = prefs[Keys.VAD_DB] ?: 3.5f,
-            engineMode = prefs[Keys.ENGINE_MODE]?.let {
-                runCatching { RecognitionEngineMode.valueOf(it) }.getOrNull()
-            } ?: RecognitionEngineMode.OFFLINE_ONLY,
+            engineMode = RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
+            onlineServerUrl = prefs[Keys.ONLINE_SERVER_URL] ?: "",
+            onlineAccessToken = prefs[Keys.ONLINE_ACCESS_TOKEN] ?: "",
             fontSizeSp = prefs[Keys.FONT_SIZE] ?: 18,
             autoNumbering = prefs[Keys.AUTO_NUMBERING] ?: true,
             autoPunctuation = prefs[Keys.AUTO_PUNCTUATION] ?: true,
@@ -99,9 +103,9 @@ class StudySettingsRepository(private val context: Context) {
             val current = StudySettings(
                 silenceThresholdMs = prefs[Keys.SILENCE_MS] ?: 3500L,
                 vadSensitivityDb = prefs[Keys.VAD_DB] ?: 3.5f,
-                engineMode = prefs[Keys.ENGINE_MODE]?.let {
-                    runCatching { RecognitionEngineMode.valueOf(it) }.getOrNull()
-                } ?: RecognitionEngineMode.OFFLINE_ONLY,
+                engineMode = RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
+                onlineServerUrl = prefs[Keys.ONLINE_SERVER_URL] ?: "",
+            onlineAccessToken = prefs[Keys.ONLINE_ACCESS_TOKEN] ?: "",
                 fontSizeSp = prefs[Keys.FONT_SIZE] ?: 18,
                 autoNumbering = prefs[Keys.AUTO_NUMBERING] ?: true,
                 autoPunctuation = prefs[Keys.AUTO_PUNCTUATION] ?: true,
@@ -123,7 +127,9 @@ class StudySettingsRepository(private val context: Context) {
             val updated = transform(current)
             prefs[Keys.SILENCE_MS] = updated.silenceThresholdMs
             prefs[Keys.VAD_DB] = updated.vadSensitivityDb
-            prefs[Keys.ENGINE_MODE] = updated.engineMode.name
+            prefs[Keys.ENGINE_MODE] = RecognitionEngineMode.ONLINE_HIGH_ACCURACY.name
+            prefs[Keys.ONLINE_SERVER_URL] = updated.onlineServerUrl
+            prefs[Keys.ONLINE_ACCESS_TOKEN] = updated.onlineAccessToken
             prefs[Keys.FONT_SIZE] = updated.fontSizeSp
             prefs[Keys.AUTO_NUMBERING] = updated.autoNumbering
             prefs[Keys.AUTO_PUNCTUATION] = updated.autoPunctuation
