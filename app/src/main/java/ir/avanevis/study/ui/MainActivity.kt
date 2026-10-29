@@ -8,6 +8,9 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
+import android.provider.Settings
+import android.speech.SpeechRecognizer
 import android.os.IBinder
 import android.view.WindowManager
 import android.widget.Toast
@@ -20,6 +23,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -43,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import ir.avanevis.study.data.local.NoteSentenceEntity
+import ir.avanevis.study.data.preferences.AccentPalette
 import ir.avanevis.study.data.preferences.DigitDisplayMode
 import ir.avanevis.study.data.preferences.RecognitionEngineMode
 import ir.avanevis.study.data.preferences.StudySettings
@@ -100,21 +106,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val colorScheme = if (settings.darkTheme) {
-                darkColorScheme(
-                    primary = Color(0xFF38BDF8),
-                    secondary = Color(0xFF34D399),
-                    background = Color(0xFF0F172A),
-                    surface = Color(0xFF1E293B)
-                )
-            } else {
-                lightColorScheme(
-                    primary = Color(0xFF0284C7),
-                    secondary = Color(0xFF059669),
-                    background = Color(0xFFF8FAFC),
-                    surface = Color(0xFFFFFFFF)
-                )
-            }
+            val colorScheme = avanevisColorScheme(settings.darkTheme, settings.accentPalette)
 
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 MaterialTheme(colorScheme = colorScheme) {
@@ -148,6 +140,51 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+}
+
+private fun avanevisColorScheme(dark: Boolean, accent: AccentPalette): ColorScheme {
+    val primary = when (accent) {
+        AccentPalette.OCEAN -> if (dark) Color(0xFF79C6FF) else Color(0xFF1766C2)
+        AccentPalette.VIOLET -> if (dark) Color(0xFFC5B4FF) else Color(0xFF7554C9)
+        AccentPalette.MINT -> if (dark) Color(0xFF72E5CA) else Color(0xFF087D70)
+        AccentPalette.SUNSET -> if (dark) Color(0xFFFFB995) else Color(0xFFC4593C)
+    }
+    return if (dark) darkColorScheme(
+        primary = primary, secondary = Color(0xFF73D8CB),
+        background = Color(0xFF0B1220), surface = Color(0xFF151F30),
+        surfaceVariant = Color(0xFF243247),
+        primaryContainer = Color(0xFF263C5D),
+        onPrimaryContainer = Color(0xFFE8F2FF)
+    ) else lightColorScheme(
+        primary = primary, secondary = Color(0xFF128C80),
+        background = Color(0xFFF5F7FB), surface = Color.White,
+        surfaceVariant = Color(0xFFE9EEF6),
+        primaryContainer = Color(0xFFE0EBFF),
+        onPrimaryContainer = Color(0xFF15335E)
+    )
+}
+
+@Composable
+private fun SectionHeading(title: String, subtitle: String? = null) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        if (subtitle != null) Text(subtitle, fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun DashboardMetric(value: String, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier) {
+    Card(modifier = modifier, shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp))
+            Text(value, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+            Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -226,9 +263,9 @@ fun AvaNevisStudyAppScreen(
                 title = {
                     Column {
                         Text(
-                            text = "آوانویس هوشمند مطالعه",
+                            text = "آوانویس  |  فضای مطالعه",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
+                            fontSize = 19.sp
                         )
                         Text(
                             text = when {
@@ -400,50 +437,51 @@ fun HomeDashboardView(
     Column(modifier = Modifier.fillMaxSize()) {
         Spacer(modifier = Modifier.height(8.dp))
 
-        // کارت اصلی شروع مطالعه بدون دخالت دست
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "یادداشت‌برداری صوتی بدون لمس گوشی",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "فقط یک بار دکمه زیر را بزنید، گوشی را کنار بگذارید و جملات مهم کتاب را بلند بخوانید تا خودکار در خطوط مجزا ثبت شوند.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = onStartStudyClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(Icons.Default.Mic, contentDescription = null)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "شروع مطالعه",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+            Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(shape = RoundedCornerShape(30.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)) {
+                    Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(6.dp))
+                        Text("دستیار هوشمند یادداشت‌برداری", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+                Text("ایده‌ها را بگو،\nآوانویس ثبت می‌کند.",
+                    fontSize = 25.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("مطالعه کن و با صدای خودت نکته‌ها را ذخیره کن؛ هر جمله به‌صورت مستقل ثبت می‌شود.",
+                    fontSize = 13.sp, lineHeight = 21.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.83f))
+                Button(onClick = onStartStudyClick,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(18.dp)) {
+                    Icon(Icons.Default.Mic, null)
+                    Spacer(Modifier.width(9.dp))
+                    Text("شروع جلسهٔ جدید", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            DashboardMetric(
+                PersianTextProcessor.convertDigits(notebooks.size.toString(), settings.digitMode),
+                "دفتر مطالعه", Icons.Default.MenuBook, Modifier.weight(1f)
+            )
+            DashboardMetric(
+                PersianTextProcessor.convertDigits(sessions.size.toString(), settings.digitMode),
+                "جلسه ثبت‌شده", Icons.Default.History, Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(18.dp))
 
         // انتخاب دفتر مطالعه
         Row(
@@ -451,7 +489,7 @@ fun HomeDashboardView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("دفترهای مطالعه (کتاب‌ها)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("کتابخانهٔ من", fontWeight = FontWeight.Bold, fontSize = 17.sp)
             TextButton(onClick = onNewNotebookClick) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
@@ -528,7 +566,8 @@ fun HomeDashboardView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenSession(session.id) },
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Row(
                             modifier = Modifier
@@ -580,6 +619,33 @@ fun ActiveStudyView(
     onMoveSentence: (NoteSentenceEntity, Boolean) -> Unit,
     onExportAction: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    var showMicrophoneHelp by remember { mutableStateOf(false) }
+    if (showMicrophoneHelp) {
+        AlertDialog(
+            onDismissRequest = { showMicrophoneHelp = false },
+            title = { Text("عیب‌یابی میکروفون و گفتار") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(if (SpeechRecognizer.isRecognitionAvailable(context))
+                        "سرویس تشخیص گفتار روی گوشی شناسایی شده است."
+                    else "هیچ سرویس تشخیص گفتار فعالی پیدا نشد.")
+                    Text("۱. مجوز میکروفون آوانویس را فعال کنید.\n۲. در تنظیمات گوشی، سرویس تشخیص گفتار Google را نصب یا فعال و زبان فارسی را بررسی کنید.\n۳. برای سرویس‌های آنلاین، اینترنت را فعال کنید.\n۴. برنامه‌های دیگری که میکروفون را اشغال کرده‌اند ببندید.\n۵. جلسه را پایان دهید و دوباره شروع کنید.")
+                    Text("توجه: دسترسی به گفتار فارسی به سرویس نصب‌شده روی گوشی بستگی دارد.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showMicrophoneHelp = false
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}"))
+                    context.startActivity(intent)
+                }) { Text("تنظیمات مجوز برنامه") }
+            },
+            dismissButton = { TextButton(onClick = { showMicrophoneHelp = false }) { Text("بستن") } }
+        )
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         // نوار وضعیت زنده شنیدن پیوسته و نشانگر صوتی
         Card(
@@ -715,33 +781,49 @@ fun ActiveStudyView(
             }
         }
 
+        if (telemetry.state == ListeningState.RECOVERING_ERROR) {
+            Spacer(Modifier.height(8.dp))
+            Card(colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer),
+                shape = RoundedCornerShape(18.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("اتصال گفتار نیاز به بررسی دارد", modifier = Modifier.weight(1f),
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                    TextButton(onClick = { showMicrophoneHelp = true }) {
+                        Text("راهنمای رفع مشکل")
+                    }
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(10.dp))
 
         // نوار ابزار خروجی گرفتن سریع (کپی، اشتراک، TXT، PDF)
-        Row(
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            AssistChip(
+            item { AssistChip(
                 onClick = { onExportAction("COPY") },
                 label = { Text("کپی همه") },
                 leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) }
-            )
-            AssistChip(
+            ) }
+            item { AssistChip(
                 onClick = { onExportAction("TXT") },
                 label = { Text("خروجی TXT") },
                 leadingIcon = { Icon(Icons.Default.Description, null, Modifier.size(16.dp)) }
-            )
-            AssistChip(
+            ) }
+            item { AssistChip(
                 onClick = { onExportAction("PDF") },
                 label = { Text("خروجی PDF") },
                 leadingIcon = { Icon(Icons.Default.PictureAsPdf, null, Modifier.size(16.dp)) }
-            )
-            AssistChip(
+            ) }
+            item { AssistChip(
                 onClick = { onExportAction("SHARE") },
                 label = { Text("اشتراک") },
                 leadingIcon = { Icon(Icons.Default.Share, null, Modifier.size(16.dp)) }
-            )
+            ) }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -828,9 +910,11 @@ fun SettingsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("تنظیمات هوشمند یادداشت‌برداری") },
+        title = { Text("تنظیمات و شخصی‌سازی", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionHeading("شنیدن و تشخیص گفتار")
                 Text(
                     text = "مدت مکث مجاز در یک جمله: ${PersianTextProcessor.convertDigits(settings.silenceThresholdMs.toString(), settings.digitMode)} میلی‌ثانیه",
                     fontSize = 13.sp,
@@ -843,6 +927,36 @@ fun SettingsDialog(
                 )
                 Text("در طول مکث متن موقت ذخیره نمی‌شود؛ فقط بعد از پایان این بازه یک یادداشت نهایی ساخته می‌شود.", fontSize = 11.sp)
 
+                SectionHeading("نمایش و خوانایی")
+                Text("رنگ رابط کاربری", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(4) { index ->
+                        val palette = AccentPalette.values()[index]
+                        val label = when (palette) {
+                            AccentPalette.OCEAN -> "آبی"
+                            AccentPalette.VIOLET -> "بنفش"
+                            AccentPalette.MINT -> "سبز"
+                            AccentPalette.SUNSET -> "مرجانی"
+                        }
+                        FilterChip(selected = settings.accentPalette == palette,
+                            onClick = { onUpdate { it.copy(accentPalette = palette) } },
+                            label = { Text(label) })
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("حالت تاریک", fontSize = 14.sp)
+                    Switch(checked = settings.darkTheme,
+                        onCheckedChange = { value -> onUpdate { it.copy(darkTheme = value) } })
+                }
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("روشن ماندن صفحه در مطالعه", fontSize = 14.sp)
+                    Switch(checked = settings.keepScreenOnDuringStudy,
+                        onCheckedChange = { value -> onUpdate { it.copy(keepScreenOnDuringStudy = value) } })
+                }
                 Text(
                     text = "اندازه فونت یادداشت‌ها: ${PersianTextProcessor.convertDigits(settings.fontSizeSp.toString(), settings.digitMode)}",
                     fontSize = 13.sp,

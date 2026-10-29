@@ -17,6 +17,8 @@ enum class RecognitionEngineMode {
     ONLINE_HIGH_ACCURACY
 }
 
+enum class AccentPalette { OCEAN, VIOLET, MINT, SUNSET }
+
 enum class DigitDisplayMode {
     PERSIAN, // ۰۱۲۳۴۵۶۷۸۹
     LATIN    // 0123456789
@@ -33,7 +35,8 @@ data class StudySettings(
     val digitMode: DigitDisplayMode = DigitDisplayMode.PERSIAN,
     val voiceCommandsEnabled: Boolean = true,
     val keepScreenOnDuringStudy: Boolean = false,
-    val darkTheme: Boolean = false
+    val darkTheme: Boolean = false,
+    val accentPalette: AccentPalette = AccentPalette.OCEAN
 )
 
 class StudySettingsRepository(private val context: Context) {
@@ -50,6 +53,7 @@ class StudySettingsRepository(private val context: Context) {
         val VOICE_COMMANDS = booleanPreferencesKey("voice_commands_enabled")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
+        val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
     }
 
     val settingsFlow: Flow<StudySettings> = context.dataStore.data.map { prefs ->
@@ -68,7 +72,10 @@ class StudySettingsRepository(private val context: Context) {
             } ?: DigitDisplayMode.PERSIAN,
             voiceCommandsEnabled = prefs[Keys.VOICE_COMMANDS] ?: true,
             keepScreenOnDuringStudy = prefs[Keys.KEEP_SCREEN_ON] ?: false,
-            darkTheme = prefs[Keys.DARK_THEME] ?: false
+            darkTheme = prefs[Keys.DARK_THEME] ?: false,
+            accentPalette = prefs[Keys.ACCENT_PALETTE]?.let {
+                runCatching { AccentPalette.valueOf(it) }.getOrNull()
+            } ?: AccentPalette.OCEAN
         )
     }
 
@@ -89,7 +96,10 @@ class StudySettingsRepository(private val context: Context) {
                 } ?: DigitDisplayMode.PERSIAN,
                 voiceCommandsEnabled = prefs[Keys.VOICE_COMMANDS] ?: true,
                 keepScreenOnDuringStudy = prefs[Keys.KEEP_SCREEN_ON] ?: false,
-                darkTheme = prefs[Keys.DARK_THEME] ?: false
+                darkTheme = prefs[Keys.DARK_THEME] ?: false,
+                accentPalette = prefs[Keys.ACCENT_PALETTE]?.let {
+                runCatching { AccentPalette.valueOf(it) }.getOrNull()
+                } ?: AccentPalette.OCEAN
             )
             val updated = transform(current)
             prefs[Keys.SILENCE_MS] = updated.silenceThresholdMs
@@ -103,6 +113,7 @@ class StudySettingsRepository(private val context: Context) {
             prefs[Keys.VOICE_COMMANDS] = updated.voiceCommandsEnabled
             prefs[Keys.KEEP_SCREEN_ON] = updated.keepScreenOnDuringStudy
             prefs[Keys.DARK_THEME] = updated.darkTheme
+            prefs[Keys.ACCENT_PALETTE] = updated.accentPalette.name
         }
     }
 }

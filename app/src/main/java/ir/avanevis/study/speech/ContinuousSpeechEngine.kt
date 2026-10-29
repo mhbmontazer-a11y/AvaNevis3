@@ -1,5 +1,8 @@
 package ir.avanevis.study.speech
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -81,6 +84,8 @@ class ContinuousSpeechEngine(
     private var lastSpeechActivityMs = 0L
     private var currentConfidence = 0.90f
     private var consecutiveErrors = 0
+    private var startupTimeouts = 0
+    private var fatalRecognizerError = false
 
     fun updateSettings(settings: StudySettings) {
         currentSettings = settings
@@ -97,6 +102,8 @@ class ContinuousSpeechEngine(
         utterance.clear()
         lastSpeechActivityMs = 0L
         consecutiveErrors = 0
+        startupTimeouts = 0
+        fatalRecognizerError = false
         _telemetry.value = SpeechEngineTelemetry(
             state = ListeningState.STARTING,
             statusMessage = "در حال آماده‌سازی میکروفون؛ پس از نمایش «آماده» صحبت کنید"
@@ -182,13 +189,23 @@ class ContinuousSpeechEngine(
     }
 
     private fun startRecognizerIfPossible() {
-        if (!isSessionActive || pausedForInterruption || recognizerInFlight) return
+        if (!isSessionActive || pausedForInterruption || recognizerInFlight || fatalRecognizerError) return
 
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            fatalRecognizerError = true
+            _telemetry.value = _telemetry.value.copy(
+                state = ListeningState.RECOVERING_ERROR,
+                statusMessage = "مجوز میکروفون قطع شده؛ از تنظیمات گوشی دوباره فعال کنید"
+            )
+            return
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _telemetry.value = _telemetry.value.copy(
                 state = ListeningState.RECOVERING_ERROR,
-                statusMessage = "سرویس تشخیص گفتار روی دستگاه موجود نیست"
+                statusMessage = "سرویس تشخیص گفتار نصب یا فعال نیست؛ سرویس گفتار Google و زبان فارسی را بررسی کنید"
             )
+            fatalRecognizerError = true
             return
         }
         if (speechRecognizer == null) {
@@ -217,11 +234,16 @@ class ContinuousSpeechEngine(
                         speechRecognizer?.destroy()
                     }
                     speechRecognizer = null
+                    startupTimeouts++
+                    val exhausted = startupTimeouts >= 3
+                    fatalRecognizerError = exhausted
                     _telemetry.value = _telemetry.value.copy(
                         state = ListeningState.RECOVERING_ERROR,
-                        statusMessage = "سرویس گفتار پاسخ نداد؛ تلاش مجدد..."
+                        statusMessage = if (exhausted)
+                            "سرویس گفتار پس از ۳ تلاش پاسخ نداد؛ سرویس گفتار، اینترنت و دسترسی میکروفون را بررسی کنید"
+                        else "سرویس گفتار پاسخ نداد؛ تلاش ${startupTimeouts + 1} از ۳..."
                     )
-                    scheduleRestart(delayMs = 400L, recreateRecognizer = true)
+                    if (!exhausted) scheduleRestart(delayMs = 700L, recreateRecognizer = true)
                 }
             }
         }.onFailure {
@@ -255,6 +277,8 @@ class ContinuousSpeechEngine(
 
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            startupTimeouts = 0
+            consecutiveErrors = 0
             if (!isSessionActive || pausedForInterruption) return
             readinessTimeoutJob?.cancel()
             readinessTimeoutJob = null
@@ -343,6 +367,34 @@ class ContinuousSpeechEngine(
             }
             if (utterance.hasText) scheduleCommitAfterQuietPeriod()
             consecutiveErrors = (consecutiveErrors + 1).coerceAtMost(6)
+            val errorDescription = when (error) {
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "دسترسی میکروفون رد شده است"
+                SpeechRecognizer.ERROR_AUDIO -> "میکروفون در دسترس نیست یا برنامه دیگری آن را اشغال کرده"
+                SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "ارتباط سرویس گفتار با شبکه برقرار نیست"
+                SpeechRecognizer.ERROR_SERVER -> "سرویس گفتار پاسخ نامعتبر داده است"
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "سرویس گفتار مشغول است"
+                SpeechRecognizer.ERROR_CLIENT -> "اتصال به سرویس تشخیص گفتار برقرار نشد"
+                SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "زبان فارسی توسط سرویس گفتار پشتیبانی نمی‌شود"
+                SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "بستهٔ زبان فارسی در سرویس گفتار در دسترس نیست"
+                else -> "خطای تشخیص گفتار ($error)"
+            }
+            val permanent = error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
+                error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                (consecutiveErrors >= 5 && error != SpeechRecognizer.ERROR_NO_MATCH &&
+                    error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+            if (permanent) {
+                fatalRecognizerError = true
+                _telemetry.value = _telemetry.value.copy(
+                    state = ListeningState.RECOVERING_ERROR,
+                    statusMessage = "$errorDescription؛ برای تلاش دوباره جلسه را پایان دهید و شروع کنید"
+                )
+                return
+            }
+            _telemetry.value = _telemetry.value.copy(
+                state = ListeningState.RECOVERING_ERROR,
+                statusMessage = "$errorDescription؛ تلاش مجدد..."
+            )
             val backoff = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 120L
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_CLIENT -> 350L
