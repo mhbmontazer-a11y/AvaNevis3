@@ -17,7 +17,10 @@ enum class RecognitionEngineMode {
     ONLINE_HIGH_ACCURACY
 }
 
-enum class AccentPalette { OCEAN, VIOLET, MINT, SUNSET }
+/** Different latency/recognition-provider request profiles; none guarantees transcription accuracy. */
+enum class SpeechQualityProfile { QUICK, BALANCED, CAREFUL }
+
+enum class AccentPalette { OCEAN, VIOLET, MINT, SUNSET, ROSE, AMBER }
 
 enum class DigitDisplayMode {
     PERSIAN, // ۰۱۲۳۴۵۶۷۸۹
@@ -36,7 +39,10 @@ data class StudySettings(
     val voiceCommandsEnabled: Boolean = true,
     val keepScreenOnDuringStudy: Boolean = false,
     val darkTheme: Boolean = false,
-    val accentPalette: AccentPalette = AccentPalette.OCEAN
+    val accentPalette: AccentPalette = AccentPalette.OCEAN,
+    val maxStartupRetries: Int = 3,
+    val showRecognitionConfidence: Boolean = false,
+    val speechQualityProfile: SpeechQualityProfile = SpeechQualityProfile.BALANCED
 )
 
 class StudySettingsRepository(private val context: Context) {
@@ -54,6 +60,9 @@ class StudySettingsRepository(private val context: Context) {
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val ACCENT_PALETTE = stringPreferencesKey("accent_palette")
+        val MAX_STARTUP_RETRIES = intPreferencesKey("max_startup_retries")
+        val SHOW_CONFIDENCE = booleanPreferencesKey("show_recognition_confidence")
+        val SPEECH_PROFILE = stringPreferencesKey("speech_quality_profile")
     }
 
     val settingsFlow: Flow<StudySettings> = context.dataStore.data.map { prefs ->
@@ -75,7 +84,10 @@ class StudySettingsRepository(private val context: Context) {
             darkTheme = prefs[Keys.DARK_THEME] ?: false,
             accentPalette = prefs[Keys.ACCENT_PALETTE]?.let {
                 runCatching { AccentPalette.valueOf(it) }.getOrNull()
-            } ?: AccentPalette.OCEAN
+            } ?: AccentPalette.OCEAN,
+            maxStartupRetries = (prefs[Keys.MAX_STARTUP_RETRIES] ?: 3).coerceIn(1, 6),
+            showRecognitionConfidence = prefs[Keys.SHOW_CONFIDENCE] ?: false,
+            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED
         )
     }
 
@@ -98,8 +110,11 @@ class StudySettingsRepository(private val context: Context) {
                 keepScreenOnDuringStudy = prefs[Keys.KEEP_SCREEN_ON] ?: false,
                 darkTheme = prefs[Keys.DARK_THEME] ?: false,
                 accentPalette = prefs[Keys.ACCENT_PALETTE]?.let {
-                runCatching { AccentPalette.valueOf(it) }.getOrNull()
-                } ?: AccentPalette.OCEAN
+                    runCatching { AccentPalette.valueOf(it) }.getOrNull()
+                } ?: AccentPalette.OCEAN,
+                maxStartupRetries = (prefs[Keys.MAX_STARTUP_RETRIES] ?: 3).coerceIn(1, 6),
+                showRecognitionConfidence = prefs[Keys.SHOW_CONFIDENCE] ?: false,
+            speechQualityProfile = prefs[Keys.SPEECH_PROFILE]?.let { runCatching { SpeechQualityProfile.valueOf(it) }.getOrNull() } ?: SpeechQualityProfile.BALANCED
             )
             val updated = transform(current)
             prefs[Keys.SILENCE_MS] = updated.silenceThresholdMs
@@ -114,6 +129,9 @@ class StudySettingsRepository(private val context: Context) {
             prefs[Keys.KEEP_SCREEN_ON] = updated.keepScreenOnDuringStudy
             prefs[Keys.DARK_THEME] = updated.darkTheme
             prefs[Keys.ACCENT_PALETTE] = updated.accentPalette.name
+            prefs[Keys.MAX_STARTUP_RETRIES] = updated.maxStartupRetries.coerceIn(1, 6)
+            prefs[Keys.SHOW_CONFIDENCE] = updated.showRecognitionConfidence
+            prefs[Keys.SPEECH_PROFILE] = updated.speechQualityProfile.name
         }
     }
 }

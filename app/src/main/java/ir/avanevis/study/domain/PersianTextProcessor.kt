@@ -10,6 +10,19 @@ import ir.avanevis.study.data.preferences.StudySettings
 object PersianTextProcessor {
 
     private const val ZWNJ = "‌"
+    private val whitespace = Regex("\\s+")
+    private val verbPrefix = Regex("(^|\\s)(ن?می)\\s+(?=[آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی]{2,})")
+    private val pluralSuffix = Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی])\\s+(ها(?:ی|یی|یم|یت|یش|یمان|یتان|یشان)?)(?=\\s|$|[.،؟!؛:])")
+    private val comparativeNonJoining = Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی][اآدذرزژو])\\s+(ترین|تر)(?=\\s|$|[.،؟!؛:])")
+    private val comparativeJoining = Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی][بپتثجچحخسشصضطظعغفقکگلمنهی])\\s+(ترین|تر)(?=\\s|$|[.،؟!؛:])")
+    private val passiveSuffix = Regex("(ثبت|ذخیره|تولید|طراحی|پیاده|ساخته|شناخته|گفته|نوشته|خوانده)\\s+(شده)(?=\\s|$|[.،؟!؛:])")
+    private val commaCommand = Regex("\\s+ویرگول(?=\\s|$)")
+    private val questionCommand = Regex("\\s+علامت سوال(?=\\s|$)")
+    private val questionHamzaCommand = Regex("\\s+علامت سؤال(?=\\s|$)")
+    private val colonCommand = Regex("\\s+دو نقطه(?=\\s|$)")
+    private val punctuation = Regex("[.،؟!؛:«»\u200c]")
+    private val persianDigits = charArrayOf('۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹')
+    private val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
 
     // ترکیبات رایج علمی و کتابی که در موتورهای گفتار با فاصله معمولی برگردانده می‌شوند
     private val COMPOUND_WORDS = mapOf(
@@ -79,7 +92,7 @@ object PersianTextProcessor {
         text = convertDigits(text, settings.digitMode)
 
         // ۵. پاک‌سازی فاصله‌های اضافه
-        text = text.replace(Regex("\\s+"), " ").trim()
+        text = text.replace(whitespace, " ").trim()
 
         return text
     }
@@ -105,32 +118,32 @@ object PersianTextProcessor {
         // ۱. پیشوند افعال استمراری «می» و «نمی» + فاصله -> نیم‌فاصله
         // مثال: «می شود» -> «می‌شود»، «نمی تواند» -> «نمی‌تواند»
         result = result.replace(
-            Regex("(^|\\s)(ن?می)\\s+(?=[آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی]{2,})"),
+            verbPrefix,
             "$1$2$ZWNJ"
         )
 
         // ۲. پسوند جمع «ها» و «های» و «هایی»
         // مثال: «روش های» -> «روش‌های»، «کتاب ها» -> «کتاب‌ها»
         result = result.replace(
-            Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی])\\s+(ها(?:ی|یی|یم|یت|یش|یمان|یتان|یشان)?)(?=\\s|$|[.،؟!؛:])"),
+            pluralSuffix,
             "$1$ZWNJ$2"
         )
 
         // ۳. پسوند صفت تفضیلی و عالی «تر» و «ترین»
         // الف) حروفی که از چپ نمی‌چسبند (ا آ د ذ ر ز ژ و): مستقیم بدون نیم‌فاصله («مؤثر ترین» -> «مؤثرترین»)
         result = result.replace(
-            Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی][اآدذرزژو])\\s+(ترین|تر)(?=\\s|$|[.،؟!؛:])"),
+            comparativeNonJoining,
             "$1$2"
         )
         // ب) حروفی که از چپ می‌چسبند: درج نیم‌فاصله («بزرگ تر» -> «بزرگ‌تر»، «مهم ترین» -> «مهم‌ترین»)
         result = result.replace(
-            Regex("([آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی][بپتثجچحخسشصضطظعغفقکگلمنهی])\\s+(ترین|تر)(?=\\s|$|[.،؟!؛:])"),
+            comparativeJoining,
             "$1$ZWNJ$2"
         )
 
         // ۴. پسوند «شده» در صفات مفعولی (مثال: «ثبت شده» -> «ثبت‌شده»)
         result = result.replace(
-            Regex("(ثبت|ذخیره|تولید|طراحی|پیاده|ساخته|شناخته|گفته|نوشته|خوانده)\\s+(شده)(?=\\s|$|[.،؟!؛:])"),
+            passiveSuffix,
             "$1$ZWNJ$2"
         )
 
@@ -144,10 +157,10 @@ object PersianTextProcessor {
 
         // تبدیل علائم گفتاری صریح در صورت بیان شدن
         text = text
-            .replace(Regex("\\s+ویرگول(?=\\s|$)"), "،")
-            .replace(Regex("\\s+علامت سوال(?=\\s|$)"), "؟")
-            .replace(Regex("\\s+علامت سؤال(?=\\s|$)"), "؟")
-            .replace(Regex("\\s+دو نقطه(?=\\s|$)"), ":")
+            .replace(commaCommand, "،")
+            .replace(questionCommand, "؟")
+            .replace(questionHamzaCommand, "؟")
+            .replace(colonCommand, ":")
 
         val lastChar = text.last()
         val hasEndingPunctuation = lastChar in charArrayOf('.', '؟', '!', '؛', ':', '…')
@@ -162,8 +175,6 @@ object PersianTextProcessor {
     }
 
     fun convertDigits(input: String, mode: DigitDisplayMode): String {
-        val persianDigits = charArrayOf('۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹')
-        val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
 
         val sb = StringBuilder(input.length)
         for (ch in input) {
@@ -211,6 +222,6 @@ object PersianTextProcessor {
     }
 
     private fun stripPunctuation(s: String): String {
-        return s.replace(Regex("[.،؟!؛:«»\u200c]"), " ").replace(Regex("\\s+"), " ").trim()
+        return s.replace(punctuation, " ").replace(whitespace, " ").trim()
     }
 }

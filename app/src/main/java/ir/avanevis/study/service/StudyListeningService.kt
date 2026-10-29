@@ -20,6 +20,7 @@ import ir.avanevis.study.AvaNevisApp
 import ir.avanevis.study.R
 import ir.avanevis.study.data.preferences.StudySettings
 import ir.avanevis.study.data.preferences.RecognitionEngineMode
+import ir.avanevis.study.data.preferences.SpeechQualityProfile
 import ir.avanevis.study.data.preferences.DigitDisplayMode
 import ir.avanevis.study.domain.StudyVoiceCommand
 import ir.avanevis.study.speech.ContinuousSpeechEngine
@@ -68,6 +69,13 @@ class StudyListeningService : LifecycleService() {
 
     val telemetry: StateFlow<SpeechEngineTelemetry>
         get() = speechEngine.telemetry
+
+    /** Reconnect speech provider without ending or duplicating the study session. */
+    fun retrySpeechRecognition() {
+        if (activeSessionId > 0L && stoppingJob?.isActive != true) {
+            speechEngine.retryRecognition()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -162,7 +170,12 @@ class StudyListeningService : LifecycleService() {
                 DigitDisplayMode.valueOf(
                     startIntent.getStringExtra(EXTRA_DIGIT_MODE) ?: defaults.digitMode.name
                 )
-            }.getOrDefault(defaults.digitMode)
+            }.getOrDefault(defaults.digitMode),
+            speechQualityProfile = runCatching {
+                SpeechQualityProfile.valueOf(
+                    startIntent.getStringExtra(EXTRA_SPEECH_PROFILE) ?: defaults.speechQualityProfile.name
+                )
+            }.getOrDefault(defaults.speechQualityProfile)
         )
         // Start right after foreground/mic-focus setup. Previously we waited for
         // DataStore.first() before even opening the recognizer, losing initial words.
@@ -388,6 +401,7 @@ class StudyListeningService : LifecycleService() {
         const val EXTRA_VOICE_COMMANDS = "extra_voice_commands"
         const val EXTRA_AUTO_PUNCTUATION = "extra_auto_punctuation"
         const val EXTRA_FIX_HALF_SPACE = "extra_fix_half_space"
+        const val EXTRA_SPEECH_PROFILE = "extra_speech_profile"
         const val EXTRA_DIGIT_MODE = "extra_digit_mode"
         private const val NOTIFICATION_ID = 1001
     }

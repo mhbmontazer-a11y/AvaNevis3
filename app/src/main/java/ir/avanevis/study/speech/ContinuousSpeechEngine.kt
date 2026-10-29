@@ -14,6 +14,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import ir.avanevis.study.data.preferences.RecognitionEngineMode
+import ir.avanevis.study.data.preferences.SpeechQualityProfile
 import ir.avanevis.study.data.preferences.StudySettings
 import ir.avanevis.study.domain.PersianTextProcessor
 import ir.avanevis.study.domain.StudyVoiceCommand
@@ -47,7 +48,9 @@ data class SpeechEngineTelemetry(
     val lastCommittedText: String = "",
     val restartCount: Int = 0,
     val lastLatencyMs: Long = 0L,
-    val statusMessage: String = "آماده شروع مطالعه"
+    val statusMessage: String = "آماده شروع مطالعه",
+    val lastErrorCode: Int? = null,
+    val isRecoveryRequired: Boolean = false
 )
 
 /**
@@ -82,10 +85,38 @@ class ContinuousSpeechEngine(
     private var stopResultSignal: CompletableDeferred<Unit>? = null
     @Volatile private var stopRequested = false
     private var lastSpeechActivityMs = 0L
-    private var currentConfidence = 0.90f
+    private var currentConfidence = -1f
+    private var lastRmsUpdateMs = 0L
+    private var lastPartial = ""
+    private var recognizerGeneration = 0
     private var consecutiveErrors = 0
     private var startupTimeouts = 0
     private var fatalRecognizerError = false
+
+    /** Retry in the same study session without creating duplicate sessions or losing notes. */
+    fun retryRecognition() {
+        if (!isSessionActive || stopRequested || pausedForInterruption) return
+        restartJob?.cancel()
+        readinessTimeoutJob?.cancel()
+        pendingCommitJob?.cancel()
+        utterance.onRecognizerFailure()
+        if (utterance.hasText) scheduleCommitAfterQuietPeriod()
+        runCatching { speechRecognizer?.cancel(); speechRecognizer?.destroy()
+            recognizerGeneration++ }
+        speechRecognizer = null
+        recognizerInFlight = false
+        speechInProgress = false
+        fatalRecognizerError = false
+        startupTimeouts = 0
+        consecutiveErrors = 0
+        _telemetry.value = _telemetry.value.copy(
+            state = ListeningState.STARTING,
+            lastErrorCode = null,
+            isRecoveryRequired = false,
+            statusMessage = "در حال اتصال مجدد به سرویس گفتار..."
+        )
+        scheduleRestart(delayMs = 200L, recreateRecognizer = true)
+    }
 
     fun updateSettings(settings: StudySettings) {
         currentSettings = settings
@@ -100,6 +131,8 @@ class ContinuousSpeechEngine(
         stopResultSignal = null
         pausedForInterruption = false
         utterance.clear()
+        currentConfidence = -1f
+        lastPartial = ""
         lastSpeechActivityMs = 0L
         consecutiveErrors = 0
         startupTimeouts = 0
@@ -152,6 +185,7 @@ class ContinuousSpeechEngine(
             runCatching {
                 speechRecognizer?.cancel()
                 speechRecognizer?.destroy()
+                recognizerGeneration++
             }
             speechRecognizer = null
 
@@ -196,23 +230,41 @@ class ContinuousSpeechEngine(
             fatalRecognizerError = true
             _telemetry.value = _telemetry.value.copy(
                 state = ListeningState.RECOVERING_ERROR,
-                statusMessage = "مجوز میکروفون قطع شده؛ از تنظیمات گوشی دوباره فعال کنید"
+                statusMessage = "مجوز میکروفون قطع شده؛ از تنظیمات گوشی دوباره فعال کنید",
+                lastErrorCode = SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                isRecoveryRequired = true
             )
             return
         }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _telemetry.value = _telemetry.value.copy(
                 state = ListeningState.RECOVERING_ERROR,
-                statusMessage = "سرویس تشخیص گفتار نصب یا فعال نیست؛ سرویس گفتار Google و زبان فارسی را بررسی کنید"
+                statusMessage = "سرویس تشخیص گفتار نصب یا فعال نیست؛ سرویس گفتار Google و زبان فارسی را بررسی کنید",
+                isRecoveryRequired = true
             )
             fatalRecognizerError = true
             return
         }
         if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-                setRecognitionListener(recognitionListener)
+            // Every recognizer gets a distinct listener. Late callbacks from a destroyed
+            // instance must not change the state of the newly created recognizer.
+            val generation = ++recognizerGeneration
+            val created = runCatching {
+                SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(recognitionListener(generation))
+                }
+            }.getOrElse { failure ->
+                fatalRecognizerError = true
+                _telemetry.value = _telemetry.value.copy(
+                    state = ListeningState.RECOVERING_ERROR,
+                    statusMessage = "سرویس گفتار راه‌اندازی نشد (${failure.javaClass.simpleName})؛ برنامهٔ تشخیص گفتار گوشی را بررسی کنید",
+                    isRecoveryRequired = true
+                )
+                return
             }
+            speechRecognizer = created
         }
+        lastPartial = ""
         _telemetry.value = _telemetry.value.copy(
             state = ListeningState.STARTING,
             statusMessage = "در حال اتصال میکروفون؛ لطفاً منتظر وضعیت «آماده» باشید"
@@ -232,36 +284,55 @@ class ContinuousSpeechEngine(
                     runCatching {
                         speechRecognizer?.cancel()
                         speechRecognizer?.destroy()
+                        recognizerGeneration++
                     }
                     speechRecognizer = null
                     startupTimeouts++
-                    val exhausted = startupTimeouts >= 3
+                    val limit = currentSettings.maxStartupRetries.coerceIn(1, 6)
+                    val exhausted = startupTimeouts >= limit
                     fatalRecognizerError = exhausted
                     _telemetry.value = _telemetry.value.copy(
                         state = ListeningState.RECOVERING_ERROR,
                         statusMessage = if (exhausted)
-                            "سرویس گفتار پس از ۳ تلاش پاسخ نداد؛ سرویس گفتار، اینترنت و دسترسی میکروفون را بررسی کنید"
-                        else "سرویس گفتار پاسخ نداد؛ تلاش ${startupTimeouts + 1} از ۳..."
+                            "سرویس گفتار پس از $limit تلاش پاسخ نداد؛ سرویس گفتار، اینترنت و دسترسی میکروفون را بررسی کنید"
+                        else "سرویس گفتار پاسخ نداد؛ تلاش ${startupTimeouts + 1} از $limit...",
+                        isRecoveryRequired = exhausted
                     )
                     if (!exhausted) scheduleRestart(delayMs = 700L, recreateRecognizer = true)
                 }
             }
-        }.onFailure {
+        }.onFailure { failure ->
             readinessTimeoutJob?.cancel()
             readinessTimeoutJob = null
             recognizerInFlight = false
-            scheduleRestart(delayMs = 350L, recreateRecognizer = true)
+            startupTimeouts++
+            val limit = currentSettings.maxStartupRetries.coerceIn(1, 6)
+            fatalRecognizerError = startupTimeouts >= limit
+            _telemetry.value = _telemetry.value.copy(
+                state = ListeningState.RECOVERING_ERROR,
+                isRecoveryRequired = fatalRecognizerError,
+                statusMessage = "سرویس گفتار شروع نشد (${failure.javaClass.simpleName})؛ " +
+                    if (fatalRecognizerError) "اتصال مجدد دستی لازم است" else "تلاش مجدد..."
+            )
+            if (!fatalRecognizerError) scheduleRestart(delayMs = 500L, recreateRecognizer = true)
         }
     }
 
     private fun buildRecognizerIntent(settings: StudySettings): Intent {
-        val quietMs = settings.silenceThresholdMs.coerceIn(1500L, 8000L)
+        val baseQuietMs = settings.silenceThresholdMs.coerceIn(1500L, 8000L)
+        val quietMs = when (settings.speechQualityProfile) {
+            SpeechQualityProfile.QUICK -> (baseQuietMs * 0.75).toLong().coerceAtLeast(1200L)
+            SpeechQualityProfile.BALANCED -> baseQuietMs
+            SpeechQualityProfile.CAREFUL -> (baseQuietMs * 1.20).toLong().coerceAtMost(9000L)
+        }
         return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,
+                if (settings.speechQualityProfile == SpeechQualityProfile.CAREFUL) 5
+                else if (settings.speechQualityProfile == SpeechQualityProfile.QUICK) 1 else 3)
             // Hints only: OEM speech services may ignore silence settings.
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, quietMs)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, quietMs)
@@ -275,21 +346,25 @@ class ContinuousSpeechEngine(
         }
     }
 
-    private val recognitionListener = object : RecognitionListener {
+    private fun recognitionListener(generation: Int): RecognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            if (generation != recognizerGeneration) return
             startupTimeouts = 0
             consecutiveErrors = 0
-            if (!isSessionActive || pausedForInterruption) return
+            if (!isSessionActive || pausedForInterruption || stopRequested) return
             readinessTimeoutJob?.cancel()
             readinessTimeoutJob = null
             consecutiveErrors = 0
             _telemetry.value = _telemetry.value.copy(
                 state = ListeningState.LISTENING_READY,
-                statusMessage = "آماده شنیدن • جمله مهم را بخوانید"
+                statusMessage = "آماده شنیدن • جمله مهم را بخوانید",
+                lastErrorCode = null,
+                isRecoveryRequired = false
             )
         }
 
         override fun onBeginningOfSpeech() {
+            if (generation != recognizerGeneration) return
             if (!isSessionActive || pausedForInterruption) return
             speechInProgress = true
             lastSpeechActivityMs = SystemClock.elapsedRealtime()
@@ -301,13 +376,21 @@ class ContinuousSpeechEngine(
         }
 
         override fun onRmsChanged(rmsdB: Float) {
-            if (!isSessionActive || pausedForInterruption) return
-            _telemetry.value = _telemetry.value.copy(currentRmsDb = rmsdB.coerceIn(0f, 12f))
+            if (generation != recognizerGeneration || !isSessionActive || pausedForInterruption) return
+            val now = SystemClock.elapsedRealtime()
+            // UI doesn't need 30-60 recompositions per second for a level meter.
+            if (now - lastRmsUpdateMs < 90L) return
+            lastRmsUpdateMs = now
+            val level = rmsdB.coerceIn(0f, 12f)
+            if (kotlin.math.abs(level - _telemetry.value.currentRmsDb) >= 0.3f) {
+                _telemetry.value = _telemetry.value.copy(currentRmsDb = level)
+            }
         }
 
         override fun onBufferReceived(buffer: ByteArray?) = Unit
 
         override fun onEndOfSpeech() {
+            if (generation != recognizerGeneration) return
             if (!isSessionActive || pausedForInterruption) return
             speechInProgress = false
             lastSpeechActivityMs = SystemClock.elapsedRealtime()
@@ -318,29 +401,36 @@ class ContinuousSpeechEngine(
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
+            if (generation != recognizerGeneration) return
             if (!isSessionActive || pausedForInterruption) return
             val hypothesis = partialResults
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()?.trim().orEmpty()
             if (hypothesis.isBlank()) return
+            lastSpeechActivityMs = SystemClock.elapsedRealtime()
+            if (hypothesis == lastPartial) return
+            lastPartial = hypothesis
             pendingCommitJob?.cancel()
             utterance.onPartial(hypothesis)
-            lastSpeechActivityMs = SystemClock.elapsedRealtime()
             updatePreview("در حال نوشتن زنده؛ هنوز ذخیره نشده")
             _telemetry.value = _telemetry.value.copy(state = ListeningState.SPEECH_DETECTED)
         }
 
         override fun onResults(results: Bundle?) {
+            if (generation != recognizerGeneration) return
             if (!isSessionActive || pausedForInterruption) return
             recognizerInFlight = false
             readinessTimeoutJob?.cancel()
             readinessTimeoutJob = null
             speechInProgress = false
             consecutiveErrors = 0
-            val best = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull().orEmpty()
-            currentConfidence = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
-                ?.firstOrNull() ?: currentConfidence
+            val bestHypothesis = SpeechHypothesisSelector.select(
+                results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION),
+                results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+            )
+            val best = bestHypothesis.text
+            currentConfidence = bestHypothesis.confidence
+            lastPartial = ""
             // Final is authoritative for this ASR session, partial only a fallback.
             utterance.onFinal(best)
             updatePreview(if (stopRequested) "در حال ذخیره آخرین جمله..." else "مکث کوتاه پذیرفته می‌شود؛ در انتظار ادامه جمله...")
@@ -349,10 +439,12 @@ class ContinuousSpeechEngine(
                 return
             }
             if (utterance.hasText) scheduleCommitAfterQuietPeriod()
-            scheduleRestart(delayMs = 100L)
+            scheduleRestart(delayMs = if (currentSettings.speechQualityProfile == SpeechQualityProfile.QUICK) 70L else 100L)
         }
 
         override fun onError(error: Int) {
+            if (generation != recognizerGeneration) return
+            lastPartial = ""
             if (!isSessionActive || pausedForInterruption) return
             recognizerInFlight = false
             readinessTimeoutJob?.cancel()
@@ -387,13 +479,17 @@ class ContinuousSpeechEngine(
                 fatalRecognizerError = true
                 _telemetry.value = _telemetry.value.copy(
                     state = ListeningState.RECOVERING_ERROR,
-                    statusMessage = "$errorDescription؛ برای تلاش دوباره جلسه را پایان دهید و شروع کنید"
+                    statusMessage = "$errorDescription؛ برای تلاش دوباره دکمه «اتصال مجدد» را بزنید",
+                    lastErrorCode = error,
+                    isRecoveryRequired = true
                 )
                 return
             }
             _telemetry.value = _telemetry.value.copy(
                 state = ListeningState.RECOVERING_ERROR,
-                statusMessage = "$errorDescription؛ تلاش مجدد..."
+                statusMessage = "$errorDescription؛ تلاش مجدد...",
+                lastErrorCode = error,
+                isRecoveryRequired = false
             )
             val backoff = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 120L
@@ -466,6 +562,7 @@ class ContinuousSpeechEngine(
         )
         // Run immediately up to the first DB suspension so service captures its session id.
         val confidence = currentConfidence
+        currentConfidence = -1f
         return launchTracked { onSentenceCommitted(processed, raw, confidence, latency) }
     }
 
@@ -485,6 +582,7 @@ class ContinuousSpeechEngine(
                 runCatching {
                     speechRecognizer?.cancel()
                     speechRecognizer?.destroy()
+                    recognizerGeneration++
                 }
                 speechRecognizer = null
             }

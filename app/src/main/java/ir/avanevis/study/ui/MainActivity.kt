@@ -19,6 +19,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -39,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +55,7 @@ import ir.avanevis.study.data.local.NoteSentenceEntity
 import ir.avanevis.study.data.preferences.AccentPalette
 import ir.avanevis.study.data.preferences.DigitDisplayMode
 import ir.avanevis.study.data.preferences.RecognitionEngineMode
+import ir.avanevis.study.data.preferences.SpeechQualityProfile
 import ir.avanevis.study.data.preferences.StudySettings
 import ir.avanevis.study.domain.PersianTextProcessor
 import ir.avanevis.study.export.ExportManager
@@ -126,6 +131,7 @@ class MainActivity : ComponentActivity() {
                                     // while DataStore performs its first asynchronous read.
                                     putExtra(StudyListeningService.EXTRA_QUIET_MS, settings.silenceThresholdMs)
                                     putExtra(StudyListeningService.EXTRA_ENGINE_MODE, settings.engineMode.name)
+                                    putExtra(StudyListeningService.EXTRA_SPEECH_PROFILE, settings.speechQualityProfile.name)
                                     putExtra(StudyListeningService.EXTRA_VOICE_COMMANDS, settings.voiceCommandsEnabled)
                                     putExtra(StudyListeningService.EXTRA_AUTO_PUNCTUATION, settings.autoPunctuation)
                                     putExtra(StudyListeningService.EXTRA_FIX_HALF_SPACE, settings.fixHalfSpace)
@@ -150,6 +156,8 @@ private fun avanevisColorScheme(dark: Boolean, accent: AccentPalette): ColorSche
         AccentPalette.VIOLET -> if (dark) Color(0xFFC5B4FF) else Color(0xFF7554C9)
         AccentPalette.MINT -> if (dark) Color(0xFF72E5CA) else Color(0xFF087D70)
         AccentPalette.SUNSET -> if (dark) Color(0xFFFFB995) else Color(0xFFC4593C)
+        AccentPalette.ROSE -> if (dark) Color(0xFFFFA6C9) else Color(0xFFB52D71)
+        AccentPalette.AMBER -> if (dark) Color(0xFFFFD080) else Color(0xFF9C6200)
     }
     return if (dark) darkColorScheme(
         primary = primary, secondary = Color(0xFF73D8CB),
@@ -228,6 +236,7 @@ fun AvaNevisStudyAppScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showNewNotebookDialog by remember { mutableStateOf(false) }
     var editingSentence by remember { mutableStateOf<NoteSentenceEntity?>(null) }
+    var showManualNoteDialog by remember { mutableStateOf(false) }
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -236,6 +245,19 @@ fun AvaNevisStudyAppScreen(
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
         )
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasMicPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -320,6 +342,8 @@ fun AvaNevisStudyAppScreen(
                         }
                     },
                     onStopStudy = onStopStudyService,
+                    onRetrySpeech = { studyService?.retrySpeechRecognition() },
+                    onManualNote = { showManualNoteDialog = true },
                     onBackToHome = {
                         if (isStudying) onStopStudyService()
                         viewModel.returnToHome()
@@ -408,6 +432,16 @@ fun AvaNevisStudyAppScreen(
         )
     }
 
+    if (showManualNoteDialog) {
+        ManualNoteDialog(
+            onDismiss = { showManualNoteDialog = false },
+            onSave = { text ->
+                viewModel.addManualSentence(text)
+                showManualNoteDialog = false
+            }
+        )
+    }
+
     editingSentence?.let { target ->
         EditSentenceDialog(
             sentence = target,
@@ -442,7 +476,13 @@ fun HomeDashboardView(
             shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
-            Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val heroBrush = Brush.linearGradient(listOf(
+                MaterialTheme.colorScheme.primaryContainer,
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
+                MaterialTheme.colorScheme.primaryContainer
+            ))
+            Column(modifier = Modifier.background(heroBrush).padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(shape = RoundedCornerShape(30.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)) {
                     Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -450,7 +490,11 @@ fun HomeDashboardView(
                         Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(6.dp))
-                        Text("دستیار هوشمند یادداشت‌برداری", fontSize = 12.sp,
+                        Text("آوانویس • ${when (settings.speechQualityProfile) {
+                            SpeechQualityProfile.QUICK -> "حالت سریع"
+                            SpeechQualityProfile.BALANCED -> "حالت متعادل"
+                            SpeechQualityProfile.CAREFUL -> "حالت دقیق‌تر"
+                        }}", fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                 }
@@ -613,6 +657,8 @@ fun ActiveStudyView(
     settings: StudySettings,
     onStartOrResume: () -> Unit,
     onStopStudy: () -> Unit,
+    onRetrySpeech: () -> Unit,
+    onManualNote: () -> Unit,
     onBackToHome: () -> Unit,
     onEditSentence: (NoteSentenceEntity) -> Unit,
     onDeleteSentence: (NoteSentenceEntity) -> Unit,
@@ -662,7 +708,7 @@ fun ActiveStudyView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(12.dp)
@@ -674,6 +720,9 @@ fun ActiveStudyView(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = telemetry.statusMessage,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -789,8 +838,12 @@ fun ActiveStudyView(
                 Row(modifier = Modifier.fillMaxWidth().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("اتصال گفتار نیاز به بررسی دارد", modifier = Modifier.weight(1f),
+                    Text(if (telemetry.isRecoveryRequired) "سرویس گفتار متوقف شده؛ اتصال مجدد را امتحان کنید" else "اتصال گفتار نیاز به بررسی دارد",
+                        modifier = Modifier.weight(1f),
                         fontSize = 13.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                    if (telemetry.isRecoveryRequired) {
+                        TextButton(onClick = onRetrySpeech) { Text("اتصال مجدد") }
+                    }
                     TextButton(onClick = { showMicrophoneHelp = true }) {
                         Text("راهنمای رفع مشکل")
                     }
@@ -798,6 +851,18 @@ fun ActiveStudyView(
             }
         }
         Spacer(modifier = Modifier.height(10.dp))
+
+        // Always offer manual notes: users must not lose their study when ASR is unavailable.
+        OutlinedButton(
+            onClick = onManualNote,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Icon(Icons.Default.NoteAdd, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("افزودن یادداشت دستی")
+        }
+        Spacer(Modifier.height(6.dp))
 
         // نوار ابزار خروجی گرفتن سریع (کپی، اشتراک، TXT، PDF)
         LazyRow(
@@ -864,6 +929,11 @@ fun ActiveStudyView(
                                 fontSize = settings.fontSizeSp.sp,
                                 lineHeight = (settings.fontSizeSp + 10).sp
                             )
+                            if (settings.showRecognitionConfidence && !item.isManuallyEdited && item.confidence >= 0f) {
+                                val percent = (item.confidence.coerceIn(0f, 1f) * 100).toInt()
+                                Text("اطمینان تقریبی موتور گفتار: $percent٪", fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -915,6 +985,55 @@ fun SettingsDialog(
             Column(modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionHeading("شنیدن و تشخیص گفتار")
+                Text("پروفایل پردازش گفتار", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SpeechQualityProfile.values().forEach { profile ->
+                        val (name, detail) = when (profile) {
+                            SpeechQualityProfile.QUICK -> "سریع" to "تأخیر کمتر، یک نتیجه از موتور گفتار"
+                            SpeechQualityProfile.BALANCED -> "متعادل" to "توازن سرعت و تعداد گزینه‌های تشخیص"
+                            SpeechQualityProfile.CAREFUL -> "دقیق‌تر (در صورت پشتیبانی موتور)" to "درخواست پنج گزینه و مکث بیشتر برای پایان گفتار"
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onUpdate { it.copy(speechQualityProfile = profile) }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (settings.speechQualityProfile == profile)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = settings.speechQualityProfile == profile,
+                                    onClick = { onUpdate { it.copy(speechQualityProfile = profile) } }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(detail, fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("تغییر پروفایل از نوبت بعدی اتصال به سرویس گفتار اعمال می‌شود. کیفیت واقعی به موتور گفتار گوشی بستگی دارد.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("حداکثر تلاش راه‌اندازی میکروفون: ${settings.maxStartupRetries}", fontSize = 13.sp)
+                Slider(
+                    value = settings.maxStartupRetries.toFloat(),
+                    onValueChange = { v -> onUpdate { it.copy(maxStartupRetries = v.toInt().coerceIn(1, 6)) } },
+                    valueRange = 1f..6f,
+                    steps = 4
+                )
+                Text("اگر سرویس گفتار پاسخ ندهد، تلاش خودکار محدود می‌شود و دکمهٔ اتصال مجدد نمایش داده خواهد شد.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("نمایش اطمینان تقریبی تشخیص", fontSize = 13.sp)
+                    Switch(checked = settings.showRecognitionConfidence,
+                        onCheckedChange = { enabled -> onUpdate { it.copy(showRecognitionConfidence = enabled) } })
+                }
                 Text(
                     text = "مدت مکث مجاز در یک جمله: ${PersianTextProcessor.convertDigits(settings.silenceThresholdMs.toString(), settings.digitMode)} میلی‌ثانیه",
                     fontSize = 13.sp,
@@ -926,17 +1045,21 @@ fun SettingsDialog(
                     valueRange = 1500f..8000f
                 )
                 Text("در طول مکث متن موقت ذخیره نمی‌شود؛ فقط بعد از پایان این بازه یک یادداشت نهایی ساخته می‌شود.", fontSize = 11.sp)
+                Text("راهنمای سرعت: برای یادداشت سریع‌تر، پروفایل «سریع» و مکث کوتاه‌تر را انتخاب کنید. برای کاهش شکست جمله‌ها، مکث طولانی‌تر و پروفایل «دقیق‌تر» را امتحان کنید.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 SectionHeading("نمایش و خوانایی")
                 Text("رنگ رابط کاربری", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    repeat(4) { index ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(AccentPalette.values().size) { index ->
                         val palette = AccentPalette.values()[index]
                         val label = when (palette) {
                             AccentPalette.OCEAN -> "آبی"
                             AccentPalette.VIOLET -> "بنفش"
                             AccentPalette.MINT -> "سبز"
                             AccentPalette.SUNSET -> "مرجانی"
+                            AccentPalette.ROSE -> "رز"
+                            AccentPalette.AMBER -> "کهربایی"
                         }
                         FilterChip(selected = settings.accentPalette == palette,
                             onClick = { onUpdate { it.copy(accentPalette = palette) } },
@@ -1054,6 +1177,32 @@ fun SettingsDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("بستن") }
         }
+    )
+}
+
+@Composable
+fun ManualNoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var content by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("یادداشت جدید", fontWeight = FontWeight.Bold) },
+        text = {
+            OutlinedTextField(
+                value = content,
+                onValueChange = { content = it.take(5000) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 8,
+                label = { Text("متن نکتهٔ مطالعه") },
+                placeholder = { Text("در صورت مشکل میکروفون، نکته را اینجا بنویسید...") }
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onSave(content.trim()) }, enabled = content.isNotBlank()) {
+                Text("ذخیره یادداشت")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف") } }
     )
 }
 

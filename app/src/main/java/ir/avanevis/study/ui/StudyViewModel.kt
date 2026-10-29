@@ -9,10 +9,11 @@ import ir.avanevis.study.data.local.NotebookEntity
 import ir.avanevis.study.data.local.StudySessionEntity
 import ir.avanevis.study.data.preferences.StudySettings
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as AvaNevisApp
@@ -45,6 +46,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val searchResults: StateFlow<List<NoteSentenceEntity>> = _searchQuery
+        .debounce(250L)
+        .distinctUntilChanged()
         .flatMapLatest { query ->
             if (query.isBlank()) flowOf(emptyList())
             else dao.searchSentences(query.trim())
@@ -107,6 +110,24 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         )
         _activeSessionId.value = sessionId
         return sessionId to notebookId
+    }
+
+    /** Manual fallback when the phone has no working Persian speech provider. */
+    fun addManualSentence(text: String) {
+        val clean = text.trim().take(5000)
+        val sessionId = _activeSessionId.value ?: return
+        if (clean.isBlank()) return
+        viewModelScope.launch {
+            val session = dao.getSessionById(sessionId) ?: return@launch
+            dao.appendSentenceAutomatically(
+                sessionId = sessionId,
+                notebookId = session.notebookId,
+                processedText = clean,
+                rawText = clean,
+                confidence = 1f,
+                isManual = true
+            )
+        }
     }
 
     fun updateSentenceContent(sentence: NoteSentenceEntity, newContent: String) {
