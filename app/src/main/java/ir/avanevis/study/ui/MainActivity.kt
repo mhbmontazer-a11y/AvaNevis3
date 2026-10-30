@@ -468,7 +468,7 @@ fun HomeDashboardView(
     onOpenSession: (Long) -> Unit,
     onSearchChange: (String) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Card(
@@ -573,11 +573,8 @@ fun HomeDashboardView(
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp
             )
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(searchResults) { _, item ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                searchResults.forEach { item ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -598,14 +595,11 @@ fun HomeDashboardView(
                 fontSize = 15.sp
             )
             Spacer(modifier = Modifier.height(8.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val filtered = sessions.filter {
                     selectedNotebookId == null || it.notebookId == selectedNotebookId
                 }
-                itemsIndexed(filtered) { _, session ->
+                filtered.forEach { session ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()

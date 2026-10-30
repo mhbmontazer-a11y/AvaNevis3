@@ -78,6 +78,9 @@ object PersianTextProcessor {
         // کلمات تکراری را حذف نمی‌کنیم؛ ممکن است تکرار عمدی و معنادار باشد.
         // ادغام بافرهای تکراری در UtteranceAccumulator انجام می‌شود.
 
+        // واژه‌نامهٔ تخصصی فقط املای قابل تشخیص را اصلاح می‌کند؛ نه هر واژهٔ مشابه را.
+        text = PsychologyLexicon.correct(text)
+
         // ۲. اصلاح نیم‌فاصله‌ها (در صورت فعال بودن در تنظیمات)
         if (settings.fixHalfSpace) {
             text = applyPersianHalfSpaces(text)

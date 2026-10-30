@@ -83,6 +83,7 @@ class StudyListeningService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         val app = application as AvaNevisApp
+        ir.avanevis.study.domain.PsychologyLexicon.initialize(applicationContext)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         speechEngine = ContinuousSpeechEngine(
