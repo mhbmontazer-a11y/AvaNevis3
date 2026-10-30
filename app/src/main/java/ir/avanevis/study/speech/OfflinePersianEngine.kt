@@ -50,9 +50,10 @@ internal class OfflinePersianEngine(
     private var sessionToken = 0L
     private var silenceSinceMs = 0L
     private var samplesRead = 0L
-    private val reviewQueue = Channel<Pair<String, ByteArray>>(2)
+    private var reviewQueue = Channel<Pair<String, ByteArray>>(2)
     private var reviewWorker: Job? = null
     private val utterancePcm = ByteArrayOutputStream()
+    private var utteranceTruncated = false
     @Volatile private var reviewAudioFile: File? = null
 
     fun start(config: StudySettings) {
@@ -64,12 +65,19 @@ internal class OfflinePersianEngine(
         silenceSinceMs = 0L
         samplesRead = 0L
         utterancePcm.reset()
+        utteranceTruncated = false
+        // A stopped queue cannot be reused on retry. Give each recording its own queue.
+        reviewWorker?.cancel()
+        val queue = Channel<Pair<String, ByteArray>>(2)
+        reviewQueue = queue
+        sessionToken++
+        val token = sessionToken
         reviewWorker = scope.launch(Dispatchers.Default) {
             val reviewer = WhisperReviewEngine(context)
-            for ((original, audio) in reviewQueue) {
+            for ((original, audio) in queue) {
                 try {
                     val candidate = reviewer.transcribePcm(audio)
-                    if (WhisperCorrectionPolicy.shouldReplace(original, candidate)) {
+                    if (token == sessionToken && WhisperCorrectionPolicy.shouldReplace(original, candidate)) {
                         onWhisperCorrection(original, candidate)
                     }
                 } catch (_: Exception) {
@@ -77,9 +85,7 @@ internal class OfflinePersianEngine(
                 }
             }
         }
-        sessionToken++
         telemetry.value = SpeechEngineTelemetry(state = ListeningState.STARTING, statusMessage = "در حال بارگذاری موتور مستقل فارسی…")
-        val token = sessionToken
         worker = scope.launch(Dispatchers.IO) { recognizeLoop(token) }
     }
 
@@ -149,6 +155,8 @@ internal class OfflinePersianEngine(
                 capture?.write(buffer, 0, bytes)
                 if (utterancePcm.size() + bytes <= 20 * 16000 * 2) {
                     utterancePcm.write(buffer, 0, bytes)
+                } else {
+                    utteranceTruncated = true
                 }
                 samplesRead += bytes / 2
                 val now = System.currentTimeMillis()
@@ -204,7 +212,9 @@ internal class OfflinePersianEngine(
 
     private suspend fun commit(raw: String) {
         val captured = utterancePcm.toByteArray()
+        val truncated = utteranceTruncated
         utterancePcm.reset()
+        utteranceTruncated = false
         if (raw.isBlank()) return
         lastPartial = ""
         val started = System.currentTimeMillis()
@@ -215,7 +225,7 @@ internal class OfflinePersianEngine(
             val processed = PersianTextProcessor.processUtterance(raw, settings)
             onSentence(processed, raw, -1f, System.currentTimeMillis() - started)
             // One audio utterance maps to one saved Vosk sentence.
-            if (captured.size in (2 * 16000 * 2)..(20 * 16000 * 2)) {
+            if (!truncated && captured.size in (1 * 16000 * 2)..(20 * 16000 * 2)) {
                 reviewQueue.trySend(raw to captured)
             }
         }

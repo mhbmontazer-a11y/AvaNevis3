@@ -59,6 +59,7 @@ class StudyListeningService : LifecycleService() {
     private var timerJob: Job? = null
     private var stoppingJob: Job? = null
     private var settingsJob: Job? = null
+    @Volatile private var activeTextSettings = StudySettings()
 
     private val _elapsedSeconds = MutableStateFlow(0L)
     val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
@@ -119,7 +120,7 @@ class StudyListeningService : LifecycleService() {
                     val dao = app.database.studyDao()
                     val sentence = dao.getLatestUneditedByRaw(sessionId, original)
                     if (sentence != null && System.currentTimeMillis() - sentence.createdAt < 120_000L) {
-                        val replacement = ir.avanevis.study.domain.PersianTextProcessor.processUtterance(corrected, ir.avanevis.study.data.preferences.StudySettings())
+                        val replacement = ir.avanevis.study.domain.PersianTextProcessor.processUtterance(corrected, activeTextSettings)
                         val stillUnedited = dao.getLatestUneditedByRaw(sessionId, original)
                         if (stillUnedited?.id == sentence.id) {
                             dao.updateSentence(sentence.copy(content = replacement))
@@ -197,6 +198,7 @@ class StudyListeningService : LifecycleService() {
                 )
             }.getOrDefault(defaults.speechQualityProfile)
         )
+        activeTextSettings = initialSettings
         // Start right after foreground/mic-focus setup. Previously we waited for
         // DataStore.first() before even opening the recognizer, losing initial words.
         speechEngine.startContinuousSession(initialSettings)
@@ -204,6 +206,7 @@ class StudyListeningService : LifecycleService() {
         settingsJob?.cancel()
         settingsJob = lifecycleScope.launch {
             app.settingsRepository.settingsFlow.collect { updatedSettings ->
+                activeTextSettings = updatedSettings
                 speechEngine.updateSettings(updatedSettings)
             }
         }
