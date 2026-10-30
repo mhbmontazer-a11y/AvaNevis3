@@ -2,50 +2,71 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <thread>
 #include "whisper.h"
 
-// The tiny model is expensive to load on Android. Cache one context per process.
-// A mutex serializes inference because whisper_context is not reentrant.
-static std::mutex whisper_mutex;
-static whisper_context *cached_context = nullptr;
-static std::string cached_path;
+namespace {
+std::mutex inference_mutex;
+whisper_context *context = nullptr;
+std::string loaded_path;
+}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_ir_avanevis_study_speech_WhisperReviewEngine_nativeTranscribe(
     JNIEnv *env, jobject, jstring modelPath, jfloatArray audio) {
     if (!modelPath || !audio) return env->NewStringUTF("");
-    jsize n = env->GetArrayLength(audio);
+    const jsize n = env->GetArrayLength(audio);
     if (n < 16000 || n > 16000 * 30) return env->NewStringUTF("");
     const char *raw = env->GetStringUTFChars(modelPath, nullptr);
-    if (!raw) return env->NewStringUTF("");
-    std::string path(raw);
+    if (!raw) return nullptr;
+    const std::string path(raw);
     env->ReleaseStringUTFChars(modelPath, raw);
     std::vector<float> samples(static_cast<size_t>(n));
     env->GetFloatArrayRegion(audio, 0, n, samples.data());
     if (env->ExceptionCheck()) return nullptr;
-    std::lock_guard<std::mutex> guard(whisper_mutex);
-    if (!cached_context || cached_path != path) {
-        if (cached_context) { whisper_free(cached_context); cached_context = nullptr; }
-        cached_path.clear();
-        cached_context = whisper_init_from_file_with_params(path.c_str(), whisper_context_default_params());
-        if (!cached_context) return env->NewStringUTF("");
-        cached_path = path;
+    std::lock_guard<std::mutex> lock(inference_mutex);
+    if (!context || loaded_path != path) {
+        if (context) { whisper_free(context); context = nullptr; }
+        loaded_path.clear();
+        whisper_context_params cp = whisper_context_default_params();
+        context = whisper_init_from_file_with_params(path.c_str(), cp);
+        if (!context) {
+            jclass cls = env->FindClass("java/lang/IllegalStateException");
+            if (cls) env->ThrowNew(cls, "Whisper model could not be loaded");
+            return nullptr;
+        }
+        loaded_path = path;
     }
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    params.language = "fa";
-    params.translate = false;
-    params.no_context = true;
-    params.print_progress = false;
-    params.print_realtime = false;
-    params.print_timestamps = false;
-    params.no_timestamps = true;
-    params.n_threads = 4;
+    whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    p.language = "fa";
+    p.translate = false;
+    p.no_context = true;
+    p.single_segment = false;
+    p.no_timestamps = true;
+    p.print_progress = false;
+    p.print_realtime = false;
+    p.print_timestamps = false;
+    p.n_threads = std::min(4u, std::max(1u, std::thread::hardware_concurrency()));
     std::string result;
-    if (whisper_full(cached_context, params, samples.data(), static_cast<int>(n)) == 0) {
-        for (int i = 0; i < whisper_full_n_segments(cached_context); ++i) {
-            const char *part = whisper_full_get_segment_text(cached_context, i);
-            if (part) result += part;
+    const int rc = whisper_full(context, p, samples.data(), static_cast<int>(n));
+    if (rc != 0) {
+        jclass errorClass = env->FindClass("java/lang/IllegalStateException");
+        if (errorClass) env->ThrowNew(errorClass, "whisper_full inference failed");
+        return nullptr;
+    }
+    {
+        for (int i = 0; i < whisper_full_n_segments(context); ++i) {
+            const char *part = whisper_full_get_segment_text(context, i);
+            if (part) { if (!result.empty()) result += " "; result += part; }
         }
     }
     return env->NewStringUTF(result.c_str());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_ir_avanevis_study_speech_WhisperReviewEngine_nativeRelease(JNIEnv *, jobject) {
+    std::lock_guard<std::mutex> lock(inference_mutex);
+    if (context) { whisper_free(context); context = nullptr; }
+    loaded_path.clear();
 }

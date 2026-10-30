@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Bundle
 import android.net.Uri
 import android.provider.Settings
-import android.speech.SpeechRecognizer
 import android.os.IBinder
 import android.view.WindowManager
 import android.widget.Toast
@@ -60,6 +59,7 @@ import ir.avanevis.study.data.preferences.StudySettings
 import ir.avanevis.study.domain.PersianTextProcessor
 import ir.avanevis.study.export.ExportManager
 import ir.avanevis.study.service.StudyListeningService
+import ir.avanevis.study.speech.WhisperModelManager
 import ir.avanevis.study.speech.ListeningState
 import ir.avanevis.study.speech.SpeechEngineTelemetry
 import kotlinx.coroutines.launch
@@ -119,7 +119,9 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        AvaNevisStudyAppScreen(
+                        var modelReady by remember { mutableStateOf(WhisperModelManager.isInstalled(this@MainActivity)) }
+                        if (!modelReady) WhisperModelSetup(onReady = { modelReady = true }, onSkip = { modelReady = true })
+                        else AvaNevisStudyAppScreen(
                             viewModel = viewModel,
                             studyService = studyService,
                             onStartStudyService = { sessionId, notebookId ->
@@ -667,11 +669,9 @@ fun ActiveStudyView(
             title = { Text("عیب‌یابی میکروفون و گفتار") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(if (SpeechRecognizer.isRecognitionAvailable(context))
-                        "سرویس تشخیص گفتار روی گوشی شناسایی شده است."
-                    else "هیچ سرویس تشخیص گفتار فعالی پیدا نشد.")
+                    Text("تشخیص گفتار فقط با مدل محلی Whisper انجام می‌شود.")
                     Text("۱. مجوز میکروفون آوانویس را فعال کنید.\n۲. در تنظیمات گوشی، سرویس تشخیص گفتار Google را نصب یا فعال و زبان فارسی را بررسی کنید.\n۳. برای سرویس‌های آنلاین، اینترنت را فعال کنید.\n۴. برنامه‌های دیگری که میکروفون را اشغال کرده‌اند ببندید.\n۵. جلسه را پایان دهید و دوباره شروع کنید.")
-                    Text("توجه: دسترسی به گفتار فارسی به سرویس نصب‌شده روی گوشی بستگی دارد.",
+                    Text("تشخیص گفتار فقط روی دستگاه و با مدل Whisper انجام می‌شود.",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -982,20 +982,19 @@ fun SettingsDialog(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("بازبینی آفلاین با Whisper", fontWeight = FontWeight.SemiBold)
-                        Text("پس از پایان ضبط، متن بازبینی‌شده به‌صورت یادداشت جداگانه اضافه می‌شود؛ ممکن است چند دقیقه طول بکشد.",
+                        Text("تشخیص گفتار با Whisper", fontWeight = FontWeight.SemiBold)
+                        Text("Whisper موتور انحصاری تبدیل گفتار به متن است و مدل آن جداگانه دانلود می‌شود.",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = settings.whisperReviewEnabled,
-                        onCheckedChange = { enabled -> onUpdate { it.copy(whisperReviewEnabled = enabled) } })
+                    Text("فعال", color = MaterialTheme.colorScheme.primary)
                 }
                 Text("پروفایل پردازش گفتار", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SpeechQualityProfile.values().forEach { profile ->
                         val (name, detail) = when (profile) {
-                            SpeechQualityProfile.QUICK -> "سریع" to "تأخیر کمتر، یک نتیجه از موتور گفتار"
-                            SpeechQualityProfile.BALANCED -> "متعادل" to "توازن سرعت و تعداد گزینه‌های تشخیص"
-                            SpeechQualityProfile.CAREFUL -> "دقیق‌تر (در صورت پشتیبانی موتور)" to "درخواست پنج گزینه و مکث بیشتر برای پایان گفتار"
+                            SpeechQualityProfile.QUICK -> "سریع" to "تنظیم قدیمی؛ مسیر پردازش فقط Whisper است"
+                            SpeechQualityProfile.BALANCED -> "متعادل" to "تنظیم قدیمی؛ مسیر پردازش فقط Whisper است"
+                            SpeechQualityProfile.CAREFUL -> "دقیق‌تر (در صورت پشتیبانی موتور)" to "تنظیم قدیمی؛ مسیر پردازش فقط Whisper است"
                         }
                         Surface(
                             modifier = Modifier.fillMaxWidth().clickable {
@@ -1021,7 +1020,7 @@ fun SettingsDialog(
                         }
                     }
                 }
-                Text("تغییر پروفایل از نوبت بعدی اتصال به سرویس گفتار اعمال می‌شود. کیفیت واقعی به موتور گفتار گوشی بستگی دارد.",
+                Text("مدل Whisper روی خود گوشی اجرا می‌شود؛ سرعت به توان پردازشی و حافظه دستگاه بستگی دارد.",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("حداکثر تلاش راه‌اندازی میکروفون: ${settings.maxStartupRetries}", fontSize = 13.sp)
                 Slider(
@@ -1030,7 +1029,7 @@ fun SettingsDialog(
                     valueRange = 1f..6f,
                     steps = 4
                 )
-                Text("اگر سرویس گفتار پاسخ ندهد، تلاش خودکار محدود می‌شود و دکمهٔ اتصال مجدد نمایش داده خواهد شد.",
+                Text("در صورت بروز خطا، فایل‌های صوتی پردازش‌نشده برای بازیابی نگهداری می‌شوند.",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
@@ -1138,9 +1137,10 @@ fun SettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("موتور مستقل فارسی Vosk (بدون گوگل)", fontSize = 14.sp)
+                    Text("تشخیص کاملاً آفلاین Whisper Large-v3 Turbo", fontSize = 14.sp)
                     Switch(
-                        checked = settings.engineMode != RecognitionEngineMode.ONLINE_HIGH_ACCURACY,
+                        checked = true,
+                        enabled = false,
                         onCheckedChange = { offline ->
                             onUpdate {
                                 it.copy(
@@ -1153,7 +1153,7 @@ fun SettingsDialog(
                 }
 
                 Text(
-                    "با فعال بودن این گزینه، گفتار فارسی در خود گوشی پردازش می‌شود. مدل فارسی هنگام ساخت APK اضافه می‌شود؛ اگر مدل موجود نباشد، خطا نمایش داده می‌شود.",
+                    "پردازش گفتار فقط با مدل Whisper Large-v3 Turbo Q5_0 انجام می‌شود. مدل جدا از APK دانلود می‌شود.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

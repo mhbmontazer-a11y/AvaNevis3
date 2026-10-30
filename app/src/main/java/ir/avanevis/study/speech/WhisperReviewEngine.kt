@@ -2,73 +2,32 @@ package ir.avanevis.study.speech
 
 import android.content.Context
 import java.io.File
-import java.io.FileOutputStream
-import java.io.RandomAccessFile
-import kotlin.math.min
 
-/** Optional on-device Whisper post-session review; never replaces Vosk live notes. */
+/** Sole ASR backend. Each PCM chunk is 16kHz mono signed 16-bit little-endian. */
 internal class WhisperReviewEngine(private val context: Context) {
     private external fun nativeTranscribe(modelPath: String, samples: FloatArray): String
-
+    private external fun nativeRelease()
+    fun release() { if (available) nativeRelease() }
     companion object {
-        private val available: Boolean by lazy {
-            runCatching { System.loadLibrary("avanevis_whisper") }.isSuccess
-        }
+        private val available: Boolean by lazy { runCatching { System.loadLibrary("avanevis_whisper") }.isSuccess }
     }
-
-    /** Short 16 kHz mono signed PCM utterance, run off the recording thread. */
+    fun transcribeFile(file: File): String {
+        require(file.isFile && file.length() <= 30L * 16000 * 2) { "فایل صوتی نامعتبر یا بیش از ۳۰ ثانیه" }
+        return transcribePcm(file.readBytes())
+    }
     fun transcribePcm(pcm: ByteArray): String {
-        check(available) { "کتابخانهٔ ویسپر نصب نشده است" }
-        val model = installModel()
-        val samples = FloatArray(pcm.size / 2) { i ->
-            val lo = pcm[2 * i].toInt() and 255
-            val hi = pcm[2 * i + 1].toInt()
-            ((hi shl 8) or lo).toShort() / 32768.0f
-        }
-        return nativeTranscribe(model.absolutePath, samples).trim()
-    }
-
-    fun transcribeFile(pcm: File): List<String> {
-        check(available) { "کتابخانهٔ بومی ویسپر نصب نشده است" }
-        val model = installModel()
-        val results = mutableListOf<String>()
-        // Stream from disk: bounded memory even after a long study session.
-        // 22 seconds + 2 seconds overlap to reduce words lost at segment edges.
-        val windowSamples = 22 * 16000
-        val overlapSamples = 2 * 16000
-        val buffer = ByteArray(windowSamples * 2)
-        RandomAccessFile(pcm, "r").use { input ->
-            var startSample = 0L
-            val totalSamples = input.length() / 2L
-            while (startSample < totalSamples) {
-                input.seek(startSample * 2)
-                val count = min(buffer.size.toLong(), (totalSamples - startSample) * 2).toInt()
-                input.readFully(buffer, 0, count)
-                val floats = FloatArray(count / 2) { i ->
-                    val lo = buffer[2 * i].toInt() and 255
-                    val hi = buffer[2 * i + 1].toInt()
-                    ((hi shl 8) or lo).toShort() / 32768.0f
-                }
-                val text = nativeTranscribe(model.absolutePath, floats).trim()
-                if (text.isNotBlank()) results.add(text)
-                if (startSample + count / 2 >= totalSamples) break
-                startSample += windowSamples - overlapSamples
+        check(available) { "کتابخانهٔ بومی Whisper در APK موجود نیست" }
+        check(WhisperModelManager.isInstalled(context)) { "مدل Whisper Large-v3 Turbo نصب نشده" }
+        require(pcm.size % 2 == 0 && pcm.size <= 30 * 16000 * 2)
+        // Whisper requires >=1 second. Pad short tails instead of dropping them.
+        val floats = FloatArray(maxOf(16000, pcm.size / 2)) { i ->
+            if (i * 2 + 1 >= pcm.size) 0f else {
+                val lo = pcm[i * 2].toInt() and 0xff
+                val hi = pcm[i * 2 + 1].toInt()
+                ((hi shl 8) or lo).toShort() / 32768f
             }
         }
-        return results
-    }
-
-    private fun installModel(): File {
-        val target = File(context.filesDir, "ggml-tiny.bin")
-        if (target.isFile && target.length() > 50_000_000) return target
-        val temp = File(context.filesDir, "ggml-tiny.bin.tmp")
-        try {
-            context.assets.open("whisper/ggml-tiny.bin").use { source ->
-                FileOutputStream(temp).use { out -> source.copyTo(out, 65536) }
-            }
-            check(temp.length() > 50_000_000) { "مدل Whisper ناقص است" }
-            check(temp.renameTo(target)) { "ذخیره مدل Whisper ممکن نشد" }
-        } finally { temp.delete() }
-        return target
+        // Native initialization/inference errors must never be treated as silence.
+        return nativeTranscribe(WhisperModelManager.modelFile(context).absolutePath, floats).trim()
     }
 }

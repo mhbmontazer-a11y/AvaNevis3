@@ -12,8 +12,8 @@ android {
         applicationId = "ir.avanevis.study"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "2.6.0"
+        versionCode = 15
+        versionName = "3.0.0"
         ndk { abiFilters += listOf("arm64-v8a") }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -96,7 +96,6 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
-    implementation("com.alphacephei:vosk-android:0.3.75")
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")

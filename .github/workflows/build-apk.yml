@@ -33,16 +33,6 @@ jobs:
         with:
           gradle-version: '8.6'
 
-      - name: Download verified Persian Vosk model for offline recognition
-        run: |
-          set -euo pipefail
-          mkdir -p app/src/main/assets
-          curl -fL --retry 4 --connect-timeout 30 --max-time 300 \
-            "https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip" -o /tmp/vosk-fa.zip
-          unzip -t /tmp/vosk-fa.zip >/dev/null
-          unzip -q /tmp/vosk-fa.zip -d app/src/main/assets
-          test -f app/src/main/assets/vosk-model-small-fa-0.42/am/final.mdl
-
       - name: Install native build tools
         run: sdkmanager "ndk;26.3.11579264" "cmake;3.22.1"
 
@@ -51,15 +41,6 @@ jobs:
           set -euo pipefail
           git clone --depth 1 --branch v1.7.6 https://github.com/ggml-org/whisper.cpp.git app/src/main/cpp/whisper.cpp
           test -f app/src/main/cpp/whisper.cpp/include/whisper.h
-
-      - name: Bundle multilingual Whisper tiny model for optional offline review
-        run: |
-          set -euo pipefail
-          mkdir -p app/src/main/assets/whisper
-          curl -fL --retry 4 --connect-timeout 30 --max-time 900 \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" \
-            -o app/src/main/assets/whisper/ggml-tiny.bin
-          test "$(stat -c%s app/src/main/assets/whisper/ggml-tiny.bin)" -gt 50000000
 
       - name: Run Unit Tests (Persian NLP and continuous speech)
         run: gradle testDebugUnitTest

@@ -9,11 +9,11 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "study_settings")
 
 enum class RecognitionEngineMode {
-    // Legacy setting; now routed to built-in Vosk Persian for safe upgrades.
+    // Legacy stored preference; Whisper is the only active engine.
     HYBRID_SMART,
-    // Built-in Vosk Persian model; does not need Android speech services.
+    // Legacy stored preference, no longer used.
     OFFLINE_ONLY,
-    // Android provider fallback, only when user explicitly disables Vosk.
+    // Legacy stored preference, no longer used.
     ONLINE_HIGH_ACCURACY
 }
 

@@ -6,6 +6,27 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface StudyDao {
 
+    @Query("SELECT EXISTS(SELECT 1 FROM whisper_chunk_receipts WHERE chunkId = :chunkId)")
+    suspend fun isChunkAcknowledged(chunkId: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertChunkReceipt(receipt: WhisperChunkReceipt): Long
+
+    /** Exactly-once note persistence per chunk, even if the process dies after commit.
+     * Empty recognition still gets a receipt so it will not be retried indefinitely.
+     */
+    @Transaction
+    suspend fun appendWhisperChunk(chunkId: String, sessionId: Long, notebookId: Long,
+                                  processedText: String, rawText: String) {
+        if (isChunkAcknowledged(chunkId)) return
+        val session = getSessionById(sessionId)
+        check(session != null && session.notebookId == notebookId) { "جلسهٔ اصلی این قطعه موجود نیست" }
+        if (processedText.isNotBlank()) {
+            appendSentenceAutomatically(sessionId, notebookId, processedText, rawText, -1f)
+        }
+        insertChunkReceipt(WhisperChunkReceipt(chunkId, sessionId))
+    }
+
     // --- مدیریت دفاتر مطالعه (Notebooks) ---
     @Query("SELECT * FROM notebooks ORDER BY updatedAt DESC")
     fun observeNotebooks(): Flow<List<NotebookEntity>>

@@ -114,6 +114,21 @@ class StudyListeningService : LifecycleService() {
             onVoiceCommand = { command ->
                 handleVoiceCommand(command)
             },
+            onDurableChunk = { chunkId, processed, raw, _ ->
+                // File name includes original session and notebook: recovery never
+                // writes old audio into a newly created study session.
+                val match = Regex("^s([0-9]+)_n([0-9]+)_").find(chunkId)
+                    ?: error("شناسهٔ قطعهٔ صوتی نامعتبر است")
+                val sourceSessionId = match.groupValues[1].toLong()
+                val sourceNotebookId = match.groupValues[2].toLong()
+                app.database.studyDao().appendWhisperChunk(
+                    chunkId, sourceSessionId, sourceNotebookId, processed, raw
+                )
+                if (processed.isNotBlank() && activeSessionId == sourceSessionId) {
+                    _recordedCount.value += 1
+                    updateForegroundNotification(status = "در حال گوش دادن • ${_recordedCount.value} نکته ثبت شد")
+                }
+            },
             onWhisperCorrection = { original, corrected ->
                 val sessionId = activeSessionId
                 if (sessionId > 0L) {
@@ -201,7 +216,7 @@ class StudyListeningService : LifecycleService() {
         activeTextSettings = initialSettings
         // Start right after foreground/mic-focus setup. Previously we waited for
         // DataStore.first() before even opening the recognizer, losing initial words.
-        speechEngine.startContinuousSession(initialSettings)
+        speechEngine.startContinuousSession(initialSettings, sessionId, notebookId)
         val app = application as AvaNevisApp
         settingsJob?.cancel()
         settingsJob = lifecycleScope.launch {
@@ -227,7 +242,6 @@ class StudyListeningService : LifecycleService() {
         stoppingJob = lifecycleScope.launch {
             // Don't kill the service before its final pending sentence is stored.
             speechEngine.stopContinuousSession()?.join()
-            speechEngine.takeWhisperReviewAudio()?.delete()
             releaseSafetyWakeLock()
             abandonAudioFocusListener()
 
